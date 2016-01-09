@@ -1,0 +1,13 @@
+Each module has a directory.
+
+Each module, when imported, must expose the following functions:
+
+- add_args(parser)	Having a parser as argument, add the parameters
+- handle_args(args)	Having the result of parse_args(), handle the
+			provided arguments
+- init()		Perform initialization, after handle_args() is
+			called. E.g. initialize database
+- doit()		Main functionality. Should return the exit code
+
+Each module can directly use the logging facility
+
