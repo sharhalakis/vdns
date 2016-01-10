@@ -31,7 +31,7 @@ vdns supports the following:
  * Automatic NS glue records for sub-zones
  * Human-readable serial numbers
 
-The vdns databse is a human-usable database and data are generated based
+The vdns database is a human-usable database and data are generated based
 on that. I.e. the database is not a storage for raw DNS data. For example,
 forward and reverse records are generated from the same set of data,
 TXT records are generated from both TXT and DKIM data, etc.
@@ -67,7 +67,6 @@ psql -U dns dns
 
 dns=> \dt
              List of relations
-...
  Schema │     Name      │   Type   │ Owner 
 ────────┼───────────────┼──────────┼───────
  public │ cnames        │ table    │ dns
@@ -93,7 +92,7 @@ the hacks that one would need if they were using MySQL.
 
 What you need to know:
 
- * Domains are strings, formated just like in bind. Example names:
+ * Domains are strings, formatted just like in bind. Example names:
    * example.com
    * 10.in-addr.arpa
    * 8.4.3.0.1.0.a.2.ip6.arpa
@@ -163,7 +162,7 @@ Example:
 ### dynamic
 If you are doing dynamic DNS updates then you need to specify the dynamic
 entries per domain. This way vdns will know to load them from the old zone
-files. For each dynamic vhost you need an entry in the dynamic table.
+files. For each dynamic host you need an entry in the dynamic table.
 
 The dynamic table's fields are:
 
@@ -320,6 +319,67 @@ other tables if needed (e.g. DKIM)
  * ttl: Same as in hosts
 
 vdns will break TXT data as needed
+
+## Command line tool
+### export
+To generate the zone files you need to use the vdns script's export command.
+
+Use `vdns --export` to see the accepted parameters.
+
+For example, to generate the zone files for the things that were created
+above:
+```
+mkdir /tmp/new
+
+vdns.py export \
+  --dbname dns \
+  --dbuser dns \
+  --outdir /tmp/new \
+  --all
+```
+
+If you want to export a subset of zone or reverse zones then use the
+`--domains` and `--networks` parameters instead of `--all`.
+
+Example output:
+```
+-rw-r--r-- 1 v13 v13 311 Jan 10 00:20 10.in-addr.arpa
+-rw-r--r-- 1 v13 v13 468 Jan 10 00:20 example.com
+
+$ cat 10.in-addr.arpa
+$ORIGIN         10.in-addr.arpa.
+$TTL            1D      ; 1 day
+@               1D      IN      SOA     ns1.example.com. example.example.com. (
+                                2016011000      ; serial
+                                1D              ; refresh (1 day)
+                                1H              ; retry (1 hour)
+                                90D             ; expire (12 weeks, 6 days)
+                                1H              ; minimum (1 hour)
+                                )
+
+
+1.1.1                   IN      PTR     gw.example.com.
+
+$ cat example.com
+$ORIGIN         example.com.
+$TTL            1D      ; 1 day
+@               1D      IN      SOA     ns1.example.com. example.example.com. (
+                                2016011001      ; serial
+                                1D              ; refresh (1 day)
+                                1H              ; retry (1 hour)
+                                90D             ; expire (12 weeks, 6 days)
+                                1H              ; minimum (1 hour)
+                                )
+
+_xmpp-client._tcp.test  IN      SRV     5 0 5222 jabber
+
+gw                      IN      A       10.1.1.1
+router                  IN      A       10.1.1.1
+gw                      IN      AAAA    2001:1111:2222:3333::1
+
+mail                    IN      CNAME   mail.google.com.
+```
+nice and easy
 
 # Authors
 Stefanos Harhalakis <v13@v13.gr>
