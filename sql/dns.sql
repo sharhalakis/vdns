@@ -31,7 +31,7 @@ CREATE TABLE domains (
 
 -- Timestamp of when serial number last changed
 -- If this is less than ts then serial needs to be incremented
-	last_ts		TIMESTAMP
+	updated		TIMESTAMP
 );
 
 -- Networks - Supplements the domains
