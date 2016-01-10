@@ -4,7 +4,7 @@
 
 from distutils.core import setup
 
-version='2.1.0'
+version='2.1.1'
 
 packages=[
     'vdns',
@@ -22,7 +22,7 @@ setup(
     version         = version,
     author          = 'Stefanos Harhalakis',
     author_email    = 'v13@v13.gr',
-    url             = '...',
+    url             = 'https://github.com/sharhalakis/vdns',
     packages        = packages,
     package_dir     = package_dirs,
     scripts         = scripts,
