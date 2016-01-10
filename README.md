@@ -10,7 +10,7 @@ More specifically, vdns is a modular tool that supports multiple inputs.
 Currently it supports:
 
  * Reading zone data from a database
- * Reading zone data from a a zone file
+ * Reading zone data from a zone file
 
 This makes vdns able to work well even when you are using Dynamic DNS to
 update zone files as it can parse those files.
@@ -125,6 +125,7 @@ forward and reverse zones in the domains table. The fields are
 as follows:
 
  * name: The name of the domain (string)
+ * reverse: Whether this is a reverse zone (boolean)
  * ttl: as in SOA (interval)
  * refresh: as in SOA (interval)
  * retry: as in SOA (interval)
@@ -135,8 +136,7 @@ as follows:
  * ns0: as in SOA (string)
  * ts: The time this zone was last re-generated. This is handled by the
    vdns scripts. Leave it alone. (timestamp)
- * reverse: Whether this is a reverse zone (boolean)
- * ts: Timestamp of the last time this zone had a change. This is handled by
+ * updated: Timestamp of the last time this zone had a change. This is handled by
    triggers. You should not have to touch this normally. Update it to the
    current timestamp if you want to force a zone regeneration. (timestamp)
 
