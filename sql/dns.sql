@@ -571,6 +571,11 @@ CREATE TRIGGER trig_sshfp_domain_ts_before BEFORE DELETE ON sshfp
 CREATE TRIGGER trig_sshfp_domain_ts_after AFTER INSERT OR UPDATE ON sshfp
 	FOR EACH ROW EXECUTE PROCEDURE trig_update_ts_after();
 
+CREATE TRIGGER trig_srv_domain_ts_before BEFORE DELETE ON srv
+	FOR EACH ROW EXECUTE PROCEDURE trig_update_ts_before();
+CREATE TRIGGER trig_srv_domain_ts_after AFTER INSERT OR UPDATE ON srv
+	FOR EACH ROW EXECUTE PROCEDURE trig_update_ts_after();
+
 -- End of triggers for updating the domains timestamp
 -----------------------------------------------------------------------------
 
