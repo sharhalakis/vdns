@@ -147,7 +147,7 @@ class ZoneMaker:
         if incserial and changed:
             t_source=sources[max_idx]
             serial=t_source.incserial(serial)
-            logging.debug('New serial: %d', serial)
+            logging.debug('New serial: %s', serial)
 
             for source in sources:
                 source.set_serial(serial)
