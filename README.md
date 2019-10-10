@@ -385,5 +385,5 @@ nice and easy
 Stefanos Harhalakis <v13@v13.gr>
 
 # License
-This project is developed and distributed under the GPLv3 license.
+This project is developed and distributed under the Apache 2.0 license.
 
