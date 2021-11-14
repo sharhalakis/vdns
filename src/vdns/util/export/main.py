@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding=UTF-8
 #
 # Copyright (c) 2014-2015 Stefanos Harhalakis <v13@v13.gr>
@@ -28,6 +28,7 @@ import vdns.zonemaker
 import vdns.util.common
 import vdns.util.config
 
+
 def do_domain(domain):
     """
     Generate one domain
@@ -35,38 +36,39 @@ def do_domain(domain):
     @param domain   The domain name, used also as a file name
     """
 
-    ZoneMaker=vdns.zonemaker.ZoneMaker
-    config=vdns.util.config.get_config()
+    ZoneMaker = vdns.zonemaker.ZoneMaker
+    config = vdns.util.config.get_config()
 
-    outdir=config.outdir
-    keydir=config.keydir
+    outdir = config.outdir
+    keydir = config.keydir
 
-    zm=ZoneMaker(domain, zonedir=config.olddir)
+    zm = ZoneMaker(domain, zonedir=config.olddir)
 
-    r=zm.doit(config.dokeys, config.incserial)
-    outf=outdir + '/' + domain
+    r = zm.doit(config.dokeys, config.incserial)
+    outf = outdir + '/' + domain
     vdns.util.common.write_file(outf, r['zone'])
 
     if config.dokeys:
-        keys=r['keys']
+        keys = r['keys']
         for key in keys:
-            keyf=keydir + '/' + key[1]
+            keyf = keydir + '/' + key[1]
             vdns.util.common.write_file(keyf, key[2], 0o600)
 
+
 def doit():
-    config=vdns.util.config.get_config()
-    ret=0
+    config = vdns.util.config.get_config()
+    ret = 0
 
-    db=vdns.db.get_db()
+    db = vdns.db.get_db()
 
-    networks=db.get_networks()
-    domains=db.get_domains()
+    networks = db.get_networks()
+    domains = db.get_domains()
 
-    outdir=config.outdir
-    keydir=config.keydir
+    outdir = config.outdir
+    keydir = config.keydir
 
-    logging.debug('Output zone directory is %s' % (outdir,))
-    logging.debug('Output keys directory is %s' % (keydir,))
+    logging.debug('Output zone directory is %s', outdir)
+    logging.debug('Output keys directory is %s', keydir)
 
     for net in networks:
         if not config.doall and not net['network'] in config.networks:
@@ -83,7 +85,6 @@ def doit():
 
         do_domain(domain['name'])
 
-    return(ret)
+    return ret
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

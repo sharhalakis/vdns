@@ -21,26 +21,28 @@
 # $Id$
 #
 
+import dataclasses as dc
+
+from typing import List, Optional
+
+
+@dc.dataclass
 class Config:
-    olddir      = '/etc/bind/db'    # Directory that stores existing config
-    outdir      = 'db/'
-    keydir      = 'keys/'
+    olddir: str = '/etc/bind/db'  # Directory that stores existing config
+    outdir: str = 'db/'
+    keydir: str = 'keys/'
 
-    dbname      = 'dns'
-    dbuser      = None
-    dbpass      = None
-    dbhost      = None
-    dbport      = 5432
+    dbname: str = 'dns'
+    dbuser: Optional[str] = None
+    dbpass: Optional[str] = None
+    dbhost: Optional[str] = None
+    dbport: int = 5432
 
-    domains     = []
-    networks    = []
-    doall       = False     # Do all domains/networks?
-    dokeys      = False     # Export keys?
+    domains: List[str] = dc.field(default_factory=list)
+    networks: List[str] = dc.field(default_factory=list)
+    doall: bool = False  # Do all domains/networks?
+    dokeys: bool = False  # Export keys?
 
-    incserial   = True      # Increment serial number?
-
-if __name__=="__main__":
-    pass
+    incserial: bool = True  # Increment serial number?
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

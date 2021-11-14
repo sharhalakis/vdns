@@ -25,18 +25,21 @@ import sys
 import logging
 import argparse
 import collections
+import vdns.common
 import vdns.util.config
 import vdns.util.export
 
-od=collections.OrderedDict
+od = collections.OrderedDict
 
-modules=od([
-    ('export',      vdns.util.export)
-    ])
+modules = od([
+    ('export', vdns.util.export)
+])
+
 
 def abort(msg, excode=1):
     sys.stderr.write(msg)
     sys.exit(excode)
+
 
 def init_args():
     """!
@@ -52,85 +55,89 @@ def init_args():
 
     Also sets Config.module, which can then be used for the rest of the stuff
     """
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
-    parser=argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
 
     parser.add_argument('-d', '--debug', action='store_true',
-        default=config.debug,
-        help='Enable debugging')
+                        default=config.debug,
+                        help='Enable debugging')
 
-    if config.util==None:
-        sub=parser.add_subparsers(dest='what')
+    if config.util is None:
+        sub = parser.add_subparsers(dest='what')
 
         # Add the arguments for each module
-        for k,v in modules.items():
-            subparser=sub.add_parser(k)
-            func=getattr(v, 'add_args')
+        for k, v in modules.items():
+            subparser = sub.add_parser(k)
+            func = getattr(v, 'add_args')
             func(subparser)
 
         # In this mode, this gets set later
-        module=None
+        module = None
     elif config.util in modules:
         vdns.util.export.args.add_args(parser)
-        module=modules[config.util]
+        module = modules[config.util]
     else:
         abort('Bad utility name: %s' % (config.util,))
 
     # Parse them
-    args=parser.parse_args()
+    args = parser.parse_args()
 
     # Handle top-level parameters
-    config.debug=args.debug
+    config.debug = args.debug
 
     if config.util:
-        config.what=config.util
+        config.what = config.util
     else:
-        config.what=args.what
+        config.what = args.what
 
-    if config.what==None:
+    if config.what is None:
         parser.error('Must specify a utility')
 
-    if module==None:
-        if config.what=='export':
-            module=vdns.util.export
+    if module is None:
+        if config.what == 'export':
+            module = vdns.util.export
         else:
             abort('Bad action: %s' % (config.what,))
 
-    config.module=module
+    config.module = module
 
     # Init log early
     init_log()
 
-    logging.debug('Module: %s' % (config.what,))
+    logging.debug('Module: %s', config.what)
 
     # Handle module params
     module.args.handle_args(args)
 
+
 def init_log():
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
     if config.debug:
-        level=logging.DEBUG
+        level = logging.DEBUG
     else:
-        level=logging.WARNING
+        level = logging.WARNING
 
     logging.basicConfig(level=level)
 
+
 def init():
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
     init_args()
     logging.debug('Initializing module')
     config.module.init()
 
+
 def doit():
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
     logging.debug('Doing main')
-    ret=config.module.doit()
+    ret = config.module.doit()
 
-    return(ret)
+    return ret
+
 
 def runutil(util):
     """!
@@ -138,15 +145,18 @@ def runutil(util):
 
     @param util     A utility name, or None to provide all of them
     """
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
-    config.util=util
+    config.util = util
 
     init()
 
-    ret=doit()
+    try:
+        ret = doit()
+    except vdns.common.AbortError as r:
+        logging.error('Execution failed: %s', r)
+        ret = r.excode
 
     sys.exit(ret)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

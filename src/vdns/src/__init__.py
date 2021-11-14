@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding=UTF-8
 #
 # Copyright (c) 2014-2015 Stefanos Harhalakis <v13@v13.gr>
@@ -22,4 +22,3 @@
 #
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

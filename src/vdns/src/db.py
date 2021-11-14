@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding=UTF-8
 #
 
@@ -9,26 +9,25 @@ import vdns.db
 import vdns.common
 import vdns.src.src0
 
-#from pprint import pprint
 
 class DB(vdns.src.src0.Source):
     def __init__(self, domain):
         vdns.src.src0.Source.__init__(self, domain)
-        self.db=vdns.db.get_db()
+        self.db = vdns.db.get_db()
 
-    def get_net_hosts(self, net):
-        """
-        Return all host entries that belong to that network
-        """
-        query='SELECT *, family(ip) AS family FROM hosts WHERE ip << %(net)s'
-        args={'net': net}
-
-        res=self.db.read_table_raw(query, args)
-        for x in res:
-            x['ip_str']=str(x['ip'])
-
-        return(res)
-
+    # def get_net_hosts(self, net):
+    #     """
+    #     Return all host entries that belong to that network
+    #     """
+    #     query = 'SELECT *, family(ip) AS family FROM hosts WHERE ip << %(net)s'
+    #     args = {'net': net}
+    #
+    #     res = self.db.read_table_raw(query, args)
+    #     for x in res:
+    #         x['ip_str'] = x['ip'].ip.compressed
+    #
+    #     return res
+    #
     def get_hosts(self):
         """
         Return the host entries taking care of dynamic entries
@@ -37,75 +36,145 @@ class DB(vdns.src.src0.Source):
         Dynamic entries will get their values from the zone file
         """
         # Get hosts
-        hosts=self.db.get_domain_related_data('hosts', self.domain, 'ip')
+        hosts = self.db.get_domain_related_data('hosts', self.domain, 'ip')
 
-        return(hosts)
+        return hosts
 
     def get_data(self):
-        dom=self.domain
+        return self.get_data_test()
 
-        logging.debug('Reading data for: %s' % (dom,))
+    # Testing for vdns.rr
+    def get_data_test(self):
+        dom = self.domain
+
+        logging.debug('Reading data for: %s', dom)
 
         # Get zone data
-        domain=self.db.read_table_one('domains', {'name': dom})
-        network=self.db.read_table_one('networks', {'domain': dom})
+        domain = self.db.read_table_one('domains', {'name': dom})
+        network = self.db.read_table_one('networks', {'domain': dom})
 
         if network:
             logging.debug('This is a network zone')
 
-        domain['cnames']=self.db.get_domain_related_data('cnames', dom)
-        domain['ns']=self.db.get_domain_related_data('ns', dom)
-        domain['mx']=self.db.get_domain_related_data('mx', dom)
-        domain['dnssec']=self.db.get_domain_related_data('dnssec', dom)
-        domain['txt']=self.db.get_domain_related_data('txt', dom)
-        domain['sshfp']=self.db.get_domain_related_data('sshfp', dom)
-        domain['dkim']=self.db.get_domain_related_data('dkim', dom)
-        domain['srv']=self.db.get_domain_related_data('srv', dom)
+        # print(domain)
+        # soa = vdns.rr.SOA(**{k: v for k, v in domain.items() if k not in ('ts', 'reverse', 'updated')})
+        soa = vdns.rr.make_rr(vdns.rr.SOA, domain)
+
+        def _mk(rrtype, data):
+            return [vdns.rr.make_rr(rrtype, x) for x in data]
+
+        tablemap = {'cnames': vdns.rr.CNAME,
+                    'ns': vdns.rr.NS,
+                    'mx': vdns.rr.MX,
+                    'dnssec': vdns.rr.DNSSEC,
+                    'txt': vdns.rr.TXT,
+                    'sshfp': vdns.rr.SSHFP,
+                    'dkim': vdns.rr.DKIM,
+                    'srv': vdns.rr.SRV,
+                    }
+
+        domain['cnames'] = self.db.get_domain_related_data('cnames', dom)
+        domain['ns'] = self.db.get_domain_related_data('ns', dom)
+        domain['mx'] = self.db.get_domain_related_data('mx', dom)
+        domain['dnssec'] = self.db.get_domain_related_data('dnssec', dom)
+        domain['txt'] = self.db.get_domain_related_data('txt', dom)
+        domain['sshfp'] = self.db.get_domain_related_data('sshfp', dom)
+        domain['dkim'] = self.db.get_domain_related_data('dkim', dom)
+        domain['srv'] = self.db.get_domain_related_data('srv', dom)
+
+        domain2={}
+        for rrname, data in domain.items():
+            if rrname not in tablemap:
+                continue
+            rrclass = tablemap[rrname]
+            domain2[rrname] = [vdns.rr.make_rr(rrclass, v) for v in data]
+
+        print()
+        print("domain2:", domain2)
 
         if domain['reverse']:
-            net=network['network']
-            domain['_domain']=vdns.common.reverse_name(net)
-            domain['hosts']=self.get_net_hosts(net)
-            domain['network']=net
+            net = network['network']
+            domain['_domain'] = vdns.common.reverse_name(net)
+            domain['hosts'] = self.db.get_net_hosts(net)
+            domain['network'] = net
         else:
-            domain['_domain']=dom
-            domain['hosts']=self.get_hosts()
-            domain['network']=None
+            domain['_domain'] = dom
+            domain['hosts'] = self.get_hosts()
+            domain['network'] = None
 
         # Also store subdomains
-        subs=self.db.get_subdomains(dom)
-        domain['subs']=subs
+        subs = self.db.get_subdomains(dom)
+        domain['subs'] = subs
 
-        ret=domain
+        ret = domain
 
-        return(ret)
+        return ret
+
+    def get_data_orig(self):
+        dom = self.domain
+
+        logging.debug('Reading data for: %s', dom)
+
+        # Get zone data
+        domain = self.db.read_table_one('domains', {'name': dom})
+        network = self.db.read_table_one('networks', {'domain': dom})
+
+        if network:
+            logging.debug('This is a network zone')
+
+        domain['cnames'] = self.db.get_domain_related_data('cnames', dom)
+        domain['ns'] = self.db.get_domain_related_data('ns', dom)
+        domain['mx'] = self.db.get_domain_related_data('mx', dom)
+        domain['dnssec'] = self.db.get_domain_related_data('dnssec', dom)
+        domain['txt'] = self.db.get_domain_related_data('txt', dom)
+        domain['sshfp'] = self.db.get_domain_related_data('sshfp', dom)
+        domain['dkim'] = self.db.get_domain_related_data('dkim', dom)
+        domain['srv'] = self.db.get_domain_related_data('srv', dom)
+
+        if domain['reverse']:
+            net = network['network']
+            domain['_domain'] = vdns.common.reverse_name(net)
+            domain['hosts'] = self.db.get_net_hosts(net)
+            domain['network'] = net
+        else:
+            domain['_domain'] = dom
+            domain['hosts'] = self.get_hosts()
+            domain['network'] = None
+
+        # Also store subdomains
+        subs = self.db.get_subdomains(dom)
+        domain['subs'] = subs
+
+        ret = domain
+
+        return ret
 
     def has_changed(self):
-        domain=self.domain
+        domain = self.domain
 
-        dt=self.db.read_table_one('domains', {'name': domain})
+        dt = self.db.read_table_one('domains', {'name': domain})
 
-        old=dt['serial']
+        # old=dt['serial']
 
-        ts0=dt['ts']
-        updated0=dt['updated']
+        ts0 = dt['ts']
+        updated0 = dt['updated']
 
-        if ts0==None:
-            ts=0
+        if ts0 is None:
+            ts = 0
         else:
-            ts=int(time.mktime(ts0.timetuple()))
+            ts = int(time.mktime(ts0.timetuple()))
 
-        if updated0==None:
-            updated=0
+        if updated0 is None:
+            updated = 0
         else:
-            updated=int(time.mktime(updated0.timetuple()))
+            updated = int(time.mktime(updated0.timetuple()))
 
-        if updated<=ts:
-            ret=False
+        if updated <= ts:
+            ret = False
         else:
-            ret=True
+            ret = True
 
-        return(ret)
+        return ret
 
     def incserial(self, oldserial):
         """! Increment the serial number if needed.
@@ -113,12 +182,12 @@ class DB(vdns.src.src0.Source):
         @param oldserial    Old serial (ignored)
         @return the current (new) serial number
         """
-        ret=self.incserial_date(oldserial)
+        ret = self.incserial_date(oldserial)
 
-        return(ret)
+        return ret
 
     def set_serial(self, serial):
-        domain=self.domain
+        domain = self.domain
 
         logging.debug('Storing serial number for %s: %s', domain, serial)
 
@@ -126,20 +195,19 @@ class DB(vdns.src.src0.Source):
 
 # End of class DB
 
-if __name__=="__main__":
-    vdns.db.init_db(
-        dbname  = 'dns',
-        dbuser  = 'v13',
-        dbhost  = 'my.db.host'
-    )
-
-    import pprint
-
-#    db=DB('10.in-addr.arpa')
-    db=DB('example.com')
-    dt=db.get_data()
-
-#    pprint.pprint(dt)
+# if __name__=="__main__":
+#     vdns.db.init_db(
+#         dbname  = 'dns',
+#         dbuser  = 'v13',
+#         dbhost  = 'my.db.host'
+#     )
+#
+#     import pprint
+#
+# #    db=DB('10.in-addr.arpa')
+#     db=DB('example.com')
+#     dt=db.get_data()
+#
+# #    pprint.pprint(dt)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

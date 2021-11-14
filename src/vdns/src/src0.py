@@ -1,43 +1,43 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding=UTF-8
 #
 
 import time
 import datetime
 
-class Source(object):
-    def __init__(self, domain):
-        self.domain=domain
 
-    def incserial_date(self, oldserial):
+class Source:
+    def __init__(self, domain: str):
+        self.domain = domain
+
+    def incserial_date(self, oldserial: int) -> int:
         """!
         Increment a serial number, handling date cases
 
         @param oldserial    The old serial number
         @return the new serial number
         """
-        old=oldserial
+        old = oldserial
 
         # If our convention is not the date then just increment by one
         if old > 1000000000:
-            ts=datetime.date.fromtimestamp(time.time())
-            ser0="%04d%02d%02d" % (ts.year, ts.month, ts.day)
+            ts = datetime.date.fromtimestamp(time.time())
+            ser0 = '%04d%02d%02d' % (ts.year, ts.month, ts.day)
 
-            if str(old)[:len(ser0)]==ser0:
+            if str(old)[:len(ser0)] == ser0:
                 # Same day
-                idx=old%100
-                ser=ser0 + '%02d' % (idx+1, )
-            elif old < (int(ser0)*100):
+                idx = old % 100
+                ser = int(ser0 + '%02d' % (idx + 1,))
+            elif old < (int(ser0) * 100):
                 # Normal increament
-                ser=ser0 + '00'
+                ser = int(ser0 + '00')
             else:
                 # Fail!
-                raise Exception('Old serial (%d) for %s is in the future' % \
-                    (old, domain))
+                raise Exception('Old serial (%d) for %s is in the future' % (old, self.domain))
         else:
-            ser=old+1
+            ser = old + 1
 
-        return(ser)
+        return ser
 
     # -------------------------------------------------------------------
     # Things to implement in derived classes
@@ -79,7 +79,7 @@ class Source(object):
             }
 
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def has_changed(self):
         """!
@@ -88,7 +88,7 @@ class Source(object):
 
         @return True/False
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def incserial(self, oldserial):
         """!
@@ -100,7 +100,7 @@ class Source(object):
 
         @return The next serial number to use
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def set_serial(self, serial):
         """!
@@ -109,7 +109,6 @@ class Source(object):
         Once the next serial number is determined, all sources will be called
         to store the serial number.
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

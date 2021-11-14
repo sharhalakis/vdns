@@ -1,28 +1,28 @@
 #!/usr/bin/env python
 # coding=UTF-8
 #
-
-import logging
 import os
-import copy
 import errno
+import logging
 import datetime
-import psycopg2
-import psycopg2.extras
+import ipaddress
 
 import vdns.db
 import vdns.common
 import vdns.src.src0
 import vdns.zoneparser
 
+
 class NoSuchZoneFileError(OSError):
     def __init__(self, fn):
-        err=errno.ENOENT
-        st=os.strerror(err)
+        err = errno.ENOENT
+        st = os.strerror(err)
         OSError.__init__(self, err, st, fn)
+
 
 class Dynamic(vdns.src.src0.Source):
     """! Dynamic zone handling """
+
     def __init__(self, domain, zonedir, zonefile):
         """!
         @param domain   The domain name
@@ -32,20 +32,20 @@ class Dynamic(vdns.src.src0.Source):
                         domain name
         """
         vdns.src.src0.Source.__init__(self, domain)
-        self.db=vdns.db.get_db()
-        self.zonedir=zonedir
-        self.zonefile=zonefile
+        self.db = vdns.db.get_db()
+        self.zonedir = zonedir
+        self.zonefile = zonefile
 
     def get_dynamic(self):
         """
         Return the dynamic entries of a domain
         """
-        query="""SELECT * FROM dynamic WHERE domain=%(domain)s"""
-        args={'domain': self.domain}
+        query = """SELECT * FROM dynamic WHERE domain=%(domain)s"""
+        args = {'domain': self.domain}
 
-        res=self.db.read_table_raw(query, args)
+        res = self.db.read_table_raw(query, args)
 
-        return(res)
+        return res
 
     def read_zone_file(self):
         """
@@ -54,15 +54,15 @@ class Dynamic(vdns.src.src0.Source):
 
         @return The data or None if the file failed to open / doesn't exist
         """
-        fn=self.zonedir + '/' + self.zonefile
+        fn = self.zonedir + '/' + self.zonefile
 
         if not os.path.exists(fn):
             raise NoSuchZoneFileError(fn)
 
-        z=vdns.zoneparser.ZoneParser(fn, self.domain)
-        ret=z.data()
+        z = vdns.zoneparser.ZoneParser(fn, self.domain)
+        ret = z.data()
 
-        return(ret)
+        return ret
 
     def read_dynamic(self):
         """
@@ -76,57 +76,56 @@ class Dynamic(vdns.src.src0.Source):
         """
 
         # Get database entries
-        dyns=self.get_dynamic()
+        dyns = self.get_dynamic()
 
         # If this domain doesn't have anything dynamic then be cool
-        if len(dyns)==0:
-            return({})
+        if len(dyns) == 0:
+            return {}
 
-        logging.debug('Domain %s has %d dynamic entries' % \
-            (self.domain, len(dyns)))
+        logging.debug('Domain %s has %d dynamic entries', self.domain, len(dyns))
 
         # Ensure a record for each dynamic entry
-        ret={}
+        ret = {}
         for dyn in dyns:
-            hn=dyn['hostname']
-            if hn==None:
-                hn=''
-            ret[hn]={'a': [], 'aaaa': []}
+            hn = dyn['hostname']
+            if hn is None:
+                hn = ''
+            ret[hn] = {'a': [], 'aaaa': []}
 
-        zoneinfo=self.read_zone_file()
+        zoneinfo = self.read_zone_file()
         # If we cannot open the old file then we risk loosing information
-        if zoneinfo==None:
-            vdns.common.abort('Could not open file for dynamic hosts for %s' % \
-                (self.domain, ))
+        if zoneinfo is None:
+            vdns.common.abort('Could not open file for dynamic hosts for %s' % (self.domain,))
 
         # Add information from the file
         for x in ('a', 'aaaa'):
             for i in zoneinfo[x]:
-                if i[0]==None:
-                    hn=''
+                if i[0] is None:
+                    hn = ''
                 else:
-                    hn=i[0]
+                    hn = i[0]
 
                 # Only handle file entries that exist in the dynamic table
-                if not hn in ret:
+                if hn not in ret:
                     continue
 
                 if i[2]:
-                    ttl=datetime.timedelta(0, i[2])
+                    ttl = datetime.timedelta(0, i[2])
                 else:
-                    ttl=None
+                    ttl = None
 
+                ip = ipaddress.ip_interface(i[1])
                 ret[hn][x].append({
-                    'domain':   self.domain,
+                    'domain': self.domain,
                     'hostname': hn,
-                    'ip':       i[1],
-                    'ip_str':   str(i[1]),
-                    'ttl':      ttl,
+                    'ip': ip,
+                    'ip_str': ip.compressed,
+                    'ttl': ttl,
                 })
 
-#        pprint(zoneinfo)
-#        pprint(ret)
-        return(ret)
+        #        pprint(zoneinfo)
+        #        pprint(ret)
+        return ret
 
     def get_hosts(self):
         """
@@ -136,23 +135,22 @@ class Dynamic(vdns.src.src0.Source):
         Dynamic entries will get their values from the zone file
         """
         # Get dynamic entries
-        dynamic=self.read_dynamic()
+        dynamic = self.read_dynamic()
 
         # Simplest case
-        if len(dynamic)==0:
-            return(None)
+        if len(dynamic) == 0:
+            return None
 
-        hosts=[]
+        hosts = []
 
         # Add the dynamic entries
         for host in dynamic:
             for i in ('a', 'aaaa'):
                 for entry in dynamic[host][i]:
-                    logging.debug('Adding dynamic entry %s %s %s' %
-                            (host, i, entry['ip_str']))
+                    logging.debug('Adding dynamic entry %s %s %s', host, i, entry['ip_str'])
                     hosts.append(entry)
 
-        return(hosts)
+        return hosts
 
     def determine_dynamic_serial(self, serial):
         """
@@ -168,45 +166,45 @@ class Dynamic(vdns.src.src0.Source):
         @param serial   The database serial
         @return An appropriate serial number
         """
-        zoneinfo=self.read_zone_file()
+        zoneinfo = self.read_zone_file()
 
-        fserial=int(zoneinfo['soa']['serial'])
+        fserial = int(zoneinfo['soa']['serial'])
 
-        ret=max(serial, fserial)
+        ret = max(serial, fserial)
 
-        return(ret)
+        return ret
 
     def get_data(self):
-        dom=self.domain
+        dom = self.domain
 
         if not self.db.is_dynamic(dom):
-            return(None)
+            return None
 
-        domain=self.db.read_table_one('domains', {'name': dom})
-        network=self.db.read_table_one('networks', {'domain': dom})
+        domain = self.db.read_table_one('domains', {'name': dom})
+        network = self.db.read_table_one('networks', {'domain': dom})
 
         if network:
-            dom2=vdns.common.reverse_name(network['network'])
+            dom2 = vdns.common.reverse_name(network['network'])
         else:
-            dom2=dom
+            dom2 = dom
 
-        hosts=self.get_hosts()
+        hosts = self.get_hosts()
 
         if hosts:
-            serial=self.determine_dynamic_serial(domain['serial'])
-            ret={
-                '_domain':  dom2,
-                'hosts':    hosts,
-                'serial':   serial,
+            serial = self.determine_dynamic_serial(domain['serial'])
+            ret = {
+                '_domain': dom2,
+                'hosts': hosts,
+                'serial': serial,
             }
         else:
-            ret=None
+            ret = None
 
-        return(ret)
+        return ret
 
     def has_changed(self):
         # Dynamic zones never trigger a zone regeneration by themselves
-        return(False)
+        return False
 
     def incserial(self, oldserial):
         """!
@@ -216,9 +214,9 @@ class Dynamic(vdns.src.src0.Source):
         @return The incremented serial number
         """
 
-        ret=oldserial+1
+        ret = oldserial + 1
 
-        return(ret)
+        return ret
 
     def set_serial(self, serial):
         # We don't store serial numbers
@@ -226,20 +224,19 @@ class Dynamic(vdns.src.src0.Source):
 
 # End of class Dynamic
 
-if __name__=="__main__":
-    vdns.db.init_db(
-        dbname  = 'dns',
-        dbuser  = 'v13',
-        dbhost  = 'my.db.host'
-    )
-
-    import pprint
-
-    zone='dyn.example.com'
-    dyn=Dynamic(zone, '/etc/bind/db', zone)
-    dt=dyn.get_data()
-
-    pprint.pprint(dt)
+# if __name__=="__main__":
+#    vdns.db.init_db(
+#        dbname  = 'dns',
+#        dbuser  = 'v13',
+#        dbhost  = 'my.db.host'
+#    )
+#
+#    import pprint
+#
+#    zone='dyn.example.com'
+#    dyn=Dynamic(zone, '/etc/bind/db', zone)
+#    dt=dyn.get_data()
+#
+#    pprint.pprint(dt)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-
