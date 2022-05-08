@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # coding=UTF-8
 #
-
+import ipaddress
 import logging
 import psycopg2
 import psycopg2.extras
 
 import vdns.common
+
+from typing import Any, Optional, Union
 
 _db = None
 
@@ -17,8 +19,11 @@ class NoDatabaseConnectionError(Exception):
 
 
 class DB:
-    def __init__(self, dbname, dbuser=None, dbpass=None,
-                 dbhost=None, dbport=None):
+
+    db: psycopg2.extensions.connection
+
+    def __init__(self, dbname: str, dbuser: Optional[str] = None, dbpass: Optional[str] = None,
+                 dbhost: Optional[str] = None, dbport: Optional[str] = None):
 
         psycopg2.extras.register_ipaddress()
 
@@ -51,8 +56,10 @@ class DB:
         ret = []
         for x in cur:
             dt = {}
-            for idx in range(len(cur.description)):
-                dt[cur.description[idx].name] = x[idx]
+            for idx, desc in enumerate(cur.description):
+                dt[desc.name] = x[idx]
+#            for idx in range(len(cur.description)):
+#                dt[cur.description[idx].name] = x[idx]
             ret.append(dt)
 
         return ret
@@ -72,10 +79,10 @@ class DB:
         args = {}
         for k, v in where.items():
             if v is None:
-                st = '%s IS NULL' % (k,)
+                st = f'{k} IS NULL'
             else:
                 keyname = 'k_' + k
-                st = '%s=%%(%s)s' % (k, keyname)
+                st = f'{k}=%({keyname})s'
                 args[keyname] = v
             where2.append(st)
 
@@ -85,7 +92,7 @@ class DB:
         else:
             st_where = ''
 
-        query = 'SELECT * FROM %s%s' % (tbl, st_where)
+        query = f'SELECT * FROM {tbl}{st_where}'
         res = self._read_table_raw(query, args)
 
         return res
@@ -127,6 +134,13 @@ class DB:
 
         return len(res) > 0
 
+    def fixip(self, ip: Any) -> Union[ipaddress.IPv4Address, ipaddress.IPv6Address]:
+        if isinstance(ip, (ipaddress.IPv4Interface, ipaddress.IPv6Interface)):
+            assert ip.network.prefixlen == ip.max_prefixlen
+            ip = ip.ip
+        return ip
+
+
     def get_domain_related_data(self, tbl, domain, order=None):
         """
         Return all data from table tbl that are related to domain
@@ -143,7 +157,9 @@ class DB:
             if 'hostname' not in i:
                 i['hostname'] = ''
             if 'ip' in i:
-                i['ip_str'] = i['ip'].ip.compressed
+                # Postgres returns IPv[46]Interface instead IPv[46]Address, so extract the address
+                i['ip'] = self.fixip(i['ip'])
+                i['ip_str'] = i['ip'].compressed
 
         return res
 
@@ -186,9 +202,11 @@ class DB:
 
         res = self.read_table_raw(query, args)
         for x in res:
-            x['ip_str'] = x['ip'].ip.compressed
+            x['ip'] = self.fixip(x['ip'])
+            x['ip_str'] = x['ip'].compressed
 
         return res
+
 # End of class DB
 
 
@@ -204,8 +222,6 @@ def init_db(**kwargs):
 
 
 def get_db():
-    global _db
-
     if _db is None:
         raise NoDatabaseConnectionError()
 

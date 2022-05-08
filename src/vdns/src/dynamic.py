@@ -114,13 +114,14 @@ class Dynamic(vdns.src.src0.Source):
                 else:
                     ttl = None
 
-                ip = ipaddress.ip_interface(i[1])
+                ip = ipaddress.ip_address(i[1])
                 ret[hn][x].append({
                     'domain': self.domain,
                     'hostname': hn,
                     'ip': ip,
                     'ip_str': ip.compressed,
                     'ttl': ttl,
+                    'reverse': False,
                 })
 
         #        pprint(zoneinfo)

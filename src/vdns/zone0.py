@@ -7,8 +7,8 @@ import logging
 import datetime
 import dataclasses as dc
 
-import vdns.common
 import vdns.rr
+import vdns.common
 
 from typing import List, Optional, Tuple
 
@@ -32,63 +32,69 @@ class Zone0:
     """
     Base class for producing zone files
     """
-    dt: datetime.timedelta
+    dt: Domain
 
-    def __init__(self, dt: datetime.timedelta):
+    def __init__(self, dt: Domain):
         self.dt = dt
 
     def fmttd(self, td: datetime.timedelta) -> Tuple[str, str]:
-        """
-        Format a timedelta value to something that's appropriate for
-        zones
-        """
+        r = vdns.common.zone_fmttd(td)
+        return r.value, r.human_readable
 
-        lst = ((1, '', 'second', 'seconds'),
-               (60, 'M', 'minute', 'minutes'),
-               (3600, 'H', 'hour', 'hours'),
-               (86400, 'D', 'day', 'days'),
-               (86400 * 7, 'W', 'week', 'weeks'))
-
-        ts = int(td.total_seconds())
-
-        if ts == 0:
-            raise ValueError("Timedelta can't be 0")
-
-        # Find the first value that doesn't give an exact result
-        ent = lst[0]
-        for i in lst:
-            if (ts % i[0]) != 0:
-                break
-            ent = i
-
-        ret1 = '%d%s' % (int(ts / ent[0]), ent[1])
-
-        # Now form the human readable string
-        rem = ts
-        ret2 = []
-        for i in reversed(lst):
-            t, rem = divmod(rem, i[0])
-
-            if t == 0:
-                continue
-
-            if t == 1:
-                unit = i[2]
-            else:
-                unit = i[3]
-
-            st = '%s %s' % (t, unit)
-
-            ret2.append(st)
-
-            # Speadup
-            if rem == 0:
-                break
-
-        ret2st = ', '.join(ret2)
-        ret = (ret1, ret2st)
-
-        return ret
+#    def fmttd(self, td: datetime.timedelta) -> Tuple[str, str]:
+#        """
+#        Format a timedelta value to something that's appropriate for
+#        zones
+#        """
+#
+#        lst = ((1, '', 'second', 'seconds'),
+#               (60, 'M', 'minute', 'minutes'),
+#               (3600, 'H', 'hour', 'hours'),
+#               (86400, 'D', 'day', 'days'),
+#               (86400 * 7, 'W', 'week', 'weeks'))
+#
+#        ts = int(td.total_seconds())
+#
+#        if ts == 0:
+#            raise ValueError("Timedelta can't be 0")
+#
+#        # Find the first value that doesn't give an exact result
+#        ent = lst[0]
+#        for i in lst:
+#            if (ts % i[0]) != 0:
+#                break
+#            ent = i
+#
+#        ts_scaled = int(ts / ent[0])
+#        suffix = ent[1]
+#        ret1 = f'{ts_scaled}{suffix}'
+#
+#        # Now form the human readable string
+#        rem = ts
+#        ret2 = []
+#        for i in reversed(lst):
+#            t, rem = divmod(rem, i[0])
+#
+#            if t == 0:
+#                continue
+#
+#            if t == 1:
+#                unit = i[2]
+#            else:
+#                unit = i[3]
+#
+#            st = f'{t} {unit}'
+#
+#            ret2.append(st)
+#
+#            # Speadup
+#            if rem == 0:
+#                break
+#
+#        ret2st = ', '.join(ret2)
+#        ret = (ret1, ret2st)
+#
+#        return ret
 
     def make_ptr_name(self, rec):
         """
@@ -115,8 +121,11 @@ class Zone0:
 
         return ret
 
-    #    def make_soa(self, incserial):
     def make_soa(self):
+        soa = vdns.rr.make_rr(vdns.rr.SOA, self.dt)
+        return soa.record()
+
+    def make_soa_old(self):
         """!
 NO        @param incserial    If True then increment the serial number
         """
@@ -152,52 +161,82 @@ $TTL		%(ttl)s	; %(ttl2)s
         return st
 
     def fmtrecord(self, name: str, ttl: Optional[datetime.timedelta], rr: str, data: str):
-        """
-        Format a record
+        return vdns.common.fmtrecord(name, ttl, rr, data)
 
-        This is a dump function that concatenates data, translating ttl
-
-        Use mkrecord instead
-
-        @param name     The hostname
-        @param ttl      The TTL in seconds
-        @param rr       The type of the record
-        @param data     A freeform string
-        @return The formed entry
-        """
-
-        if ttl is None:
-            ttl2 = ''
-        else:
-            t = self.fmttd(ttl)
-            ttl2 = ' ' + t[0]
-
-        ret = '%-16s%s	IN	%s	%s' % \
-              (name, ttl2, rr, data)
-
-        return ret
+#    def fmtrecord(self, name: str, ttl: Optional[datetime.timedelta], rr: str, data: str):
+#        """
+#        Format a record
+#
+#        This is a dump function that concatenates data, translating ttl
+#
+#        Use mkrecord instead
+#
+#        @param name     The hostname
+#        @param ttl      The TTL in seconds
+#        @param rr       The type of the record
+#        @param data     A freeform string
+#        @return The formed entry
+#        """
+#
+#        if ttl is None:
+#            ttl2 = ''
+#        else:
+#            t = self.fmttd(ttl)
+#            ttl2 = ' ' + t[0]
+#
+#        # TODO(delme):
+#        # ret = '%-16s%s	IN	%s	%s' % (name, ttl2, rr, data)
+#        ret = f'{name:-16s}{ttl2}	IN	{rr}	{data}'
+#
+#        return ret
 
     def split_txt(self, data):
-        """
-        Split TXT data to chunks of max 255 bytes to comply with bind
+        return vdns.common.split_txt(data)
 
-        @param data     An unquoted string of arbitrary length
-        @return A quoted string to be used as TXT record
-        """
-        limit = 255
+    # def split_txt(self, data):
+    #     """
+    #     Split TXT data to chunks of max 255 bytes to comply with bind
+    #
+    #     @param data     An unquoted string of arbitrary length
+    #     @return A quoted string to be used as TXT record
+    #     """
+    #     limit = 255
+    #
+    #     items = []
+    #     data2 = copy.deepcopy(data)
+    #     while len(data2) > limit:
+    #         items.append(data2[:limit])
+    #         data2 = data2[limit:]
+    #     items.append(data2)
+    #
+    #     ret = '"' + '" "'.join(items) + '"'
+    #
+    #     return ret
 
-        items = []
-        data2 = copy.deepcopy(data)
-        while len(data2) > limit:
-            items.append(data2[:limit])
-            data2 = data2[limit:]
-        items.append(data2)
+    def mkrecord(self, rrname: str, rec: dict) -> str:
+        types = {
+            'mx': vdns.rr.MX,
+            'ns': vdns.rr.NS,
+            'ds': vdns.rr.DS,
+            'host': vdns.rr.Host,
+            'a': vdns.rr.Host,
+            'aaaa': vdns.rr.Host,
+            'ptr': vdns.rr.PTR,
+            'cname': vdns.rr.CNAME,
+            'cnames': vdns.rr.CNAME,
+            'txt': vdns.rr.TXT,
+            'dnskey': vdns.rr.DNSKEY,
+            'dnssec': vdns.rr.DNSKEY,
+            'ds': vdns.rr.DS,
+            'sshfp': vdns.rr.SSHFP,
+            'dkim': vdns.rr.DKIM,
+            'srv': vdns.rr.SRV,
+        }
 
-        ret = '"' + '" "'.join(items) + '"'
+        rr = vdns.rr.make_rr(types[rrname], rec)
+        return rr.record()
 
-        return ret
-
-    def mkrecord(self, rr, rec):
+    def mkrecord_old(self, rr, rec):
         """
         Create a record based on RR (the type)
 
@@ -214,7 +253,7 @@ $TTL		%(ttl)s	; %(ttl2)s
 
         if rr == 'mx':
             rrname = 'MX'
-            data = '%-4d %s' % (rec['priority'], rec['mx'])
+            data = f"{rec['priority']:-4} {rec['mx']}"
             if rec['mx'].count('.') >= 2:
                 needsdot = True
         elif rr == 'ns':
@@ -225,10 +264,8 @@ $TTL		%(ttl)s	; %(ttl2)s
         elif rr == 'ds':
             rrname = 'DS'
             data = []
-            data.append('%d %d %d %s' % (rec['keyid'], rec['algorithm'],
-                                         1, rec['digest_sha1']))
-            data.append('%d %d %d %s' % (rec['keyid'], rec['algorithm'],
-                                         2, rec['digest_sha256']))
+            data.append(f"{rec['keyid']} {rec['algorithm']} 1 {rec['digest_sha1']}")
+            data.append(f"{rec['keyid']} {rec['algorithm']} 2 {rec['digest_sha256']}")
         elif rr == 'a':
             rrname = 'A'
             data = rec['ip_str'].split('/')[0]
@@ -239,7 +276,7 @@ $TTL		%(ttl)s	; %(ttl2)s
             # TODO: This is broken. We need to inverse the ip
             # and take care of ipv6 as well
             rrname = 'PTR'
-            data = '%s.%s.' % (rec['hostname'], rec['domain'])
+            data = f"{rec['hostname']}.{rec['domain']}"
             hostname = self.make_ptr_name(rec)
             needsdot = True
         elif rr in ('cname', 'cnames'):
@@ -249,7 +286,7 @@ $TTL		%(ttl)s	; %(ttl2)s
                 needsdot = True
         elif rr == 'txt':
             rrname = 'TXT'
-            data = '"%s"' % (rec['txt'],)
+            data = f"\"{rec['txt']}\""
         elif rr == 'dnssec':
             rrname = 'DNSKEY'
             if rec['ksk']:
@@ -257,7 +294,7 @@ $TTL		%(ttl)s	; %(ttl2)s
             else:
                 flags = 256
             #            rec['hostname']=rec['domain']
-            data = '%s 3 %s %s' % (flags, rec['algorithm'], rec['key_pub'])
+            data = f"{flags} 3 {rec['algorithm']} {rec['key_pub']}"
         elif rr == 'sshfp':
             rrname = 'SSHFP'
             data = '%(keytype)d %(hashtype)d %(fingerprint)s' % rec
@@ -323,20 +360,6 @@ $TTL		%(ttl)s	; %(ttl2)s
 
         return ret
 
-    def mkrecord_a_aaaa(self, rec):
-        """!
-        Auto-determine A or AAAA and call mkrecord
-
-        @record rec     The record. Must be either A or AAAA
-        @return The result of mkrecord()
-        """
-        if rec['ip'].ip.version == 4:
-            ret = self.mkrecord('a', rec)
-        else:
-            ret = self.mkrecord('aaaa', rec)
-
-        return ret
-
     def make_toplevel(self):
         """
         Create the top-level entries.
@@ -365,7 +388,7 @@ $TTL		%(ttl)s	; %(ttl2)s
                 if rec['hostname'] != '':
                     continue
 
-                ret += self.mkrecord_a_aaaa(rec)
+                ret += self.mkrecord('host', rec)
 
         # Add DKIM and SRV here (last) since they have a host part
         for x in ('dkim', 'srv'):
@@ -398,7 +421,7 @@ $TTL		%(ttl)s	; %(ttl2)s
 
             recs = self.dt['subs'][sub]['glue']
             for rec in recs:
-                glue += self.mkrecord_a_aaaa(rec)
+                glue += self.mkrecord('host', rec)
 
         if glue != '':
             ret += '\n; Glue records\n'
@@ -443,7 +466,7 @@ $TTL		%(ttl)s	; %(ttl2)s
                 continue
 
             # ip=rec['ip']
-            ret += self.mkrecord_a_aaaa(rec)
+            ret += self.mkrecord('host', rec)
 
             if hostname in done:
                 continue
@@ -513,7 +536,8 @@ $TTL		%(ttl)s	; %(ttl2)s
             if not x['reverse']:
                 continue
 
-            ip = x['ip'].ip
+            x['net_domain'] = self.dt['_domain']
+            ip = x['ip']
             k = b'%d-%s' % (ip.version, ip.packed)
             hosts[k] = x
 

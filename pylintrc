@@ -1,0 +1,233 @@
+[MASTER]
+
+# Use multiple processes to speed up Pylint.
+jobs=4
+
+# Allow loading of arbitrary C extensions. Extensions are imported into the
+# active Python interpreter and may run arbitrary code.
+unsafe-load-any-extension=no
+
+#V# [BASIC]
+#V# 
+#V# variable-naming-style=any
+#V# attr-naming-style=any
+
+[MESSAGES CONTROL]
+
+# Only show warnings with the listed confidence levels. Leave empty to show
+# all. Valid levels: HIGH, INFERENCE, INFERENCE_FAILURE, UNDEFINED
+confidence=
+
+disable=
+	missing-docstring,
+	trailing-newlines,
+	attribute-defined-outside-init,
+	no-self-use,
+	wrong-import-order,
+	wildcard-import,
+	unused-wildcard-import,
+	too-few-public-methods,
+	invalid-name,
+	too-many-statements,
+	too-many-branches,
+	too-many-locals,
+	too-many-arguments,
+	too-many-instance-attributes,
+	too-many-public-methods,
+	global-statement
+
+
+## Disable the message, report, category or checker with the given id(s). You
+## can either give multiple identifiers separated by comma (,) or put this
+## option multiple times (only on the command line, not in the configuration
+## file where it should appear only once).You can also use "--disable=all" to
+## disable everything first and then reenable specific checks. For example, if
+## you want to run only the similarities checker, you can use "--disable=all
+## --enable=similarities". If you want to run only the classes checker, but have
+## no Warning level messages displayed, use"--disable=all --enable=classes
+## --disable=W"
+#disable=abstract-method,
+#        apply-builtin,
+#        arguments-differ,
+#        attribute-defined-outside-init,
+#        backtick,
+#        bad-option-value,
+#        basestring-builtin,
+#        buffer-builtin,
+#        c-extension-no-member,
+#        consider-using-enumerate,
+#        cmp-builtin,
+#        cmp-method,
+#        coerce-builtin,
+#        coerce-method,
+#        delslice-method,
+#        div-method,
+#        duplicate-code,
+#        eq-without-hash,
+#        execfile-builtin,
+#        file-builtin,
+#        filter-builtin-not-iterating,
+#        fixme,
+#        getslice-method,
+#        global-statement,
+#        hex-method,
+#        idiv-method,
+#        implicit-str-concat-in-sequence,
+#        import-error,
+#        import-self,
+#        import-star-module-level,
+#        inconsistent-return-statements,
+#        input-builtin,
+#        intern-builtin,
+#        invalid-str-codec,
+#        locally-disabled,
+#        long-builtin,
+#        long-suffix,
+#        map-builtin-not-iterating,
+#        misplaced-comparison-constant,
+#        missing-function-docstring,
+#        metaclass-assignment,
+#        next-method-called,
+#        next-method-defined,
+#        no-absolute-import,
+#        no-else-break,
+#        no-else-continue,
+#        no-else-raise,
+#        no-else-return,
+#        no-init,  # added
+#        no-member,
+#        no-name-in-module,
+#        no-self-use,
+#        nonzero-method,
+#        oct-method,
+#        old-division,
+#        old-ne-operator,
+#        old-octal-literal,
+#        old-raise-syntax,
+#        parameter-unpacking,
+#        print-statement,
+#        raising-string,
+#        range-builtin-not-iterating,
+#        raw_input-builtin,
+#        rdiv-method,
+#        reduce-builtin,
+#        relative-import,
+#        reload-builtin,
+#        round-builtin,
+#        setslice-method,
+#        signature-differs,
+#        standarderror-builtin,
+#        suppressed-message,
+#        sys-max-int,
+#        too-few-public-methods,
+#        too-many-ancestors,
+#        too-many-arguments,
+#        too-many-boolean-expressions,
+#        too-many-branches,
+#        too-many-instance-attributes,
+#        too-many-locals,
+#        too-many-nested-blocks,
+#        too-many-public-methods,
+#        too-many-return-statements,
+#        too-many-statements,
+#        trailing-newlines,
+#        unichr-builtin,
+#        unicode-builtin,
+#        unnecessary-pass,
+#        unpacking-in-except,
+#        useless-else-on-loop,
+#        useless-object-inheritance,
+#        useless-suppression,
+#        using-cmp-argument,
+#        wrong-import-order,
+#        xrange-builtin,
+#        zip-builtin-not-iterating,
+
+
+[MISCELLANEOUS]
+notes=FIXME,XXX
+
+[BASIC]
+
+# Good variable names which should always be accepted, separated by a comma
+good-names=main,_
+
+# Include a hint for the correct naming format with invalid-name
+#V# include-naming-hint=no
+include-naming-hint=yes
+
+# List of decorators that produce properties, such as abc.abstractproperty. Add
+# to this list to register other decorators that produce valid properties.
+property-classes=abc.abstractproperty,cached_property.cached_property,cached_property.threaded_cached_property,cached_property.cached_property_with_ttl,cached_property.threaded_cached_property_with_ttl
+
+# Regular expression matching correct function names
+function-rgx=^(?:(?P<exempt>setUp|tearDown|setUpModule|tearDownModule)|(?P<camel_case>_?[A-Z][a-zA-Z0-9]*)|(?P<snake_case>_?[a-z][a-z0-9_]*))$
+
+# Regular expression matching correct variable names
+variable-rgx=^[a-z][a-z0-9_]*$
+
+# Regular expression matching correct constant names
+const-rgx=^(_?[A-Z][A-Z0-9_]*|__[a-z0-9_]+__|_?[a-z][a-z0-9_]*)$
+
+# Regular expression matching correct attribute names
+attr-rgx=^_{0,2}[a-z][a-z0-9_]*$
+
+# Regular expression matching correct argument names
+argument-rgx=^[a-z][a-z0-9_]*$
+
+# Regular expression matching correct class attribute names
+class-attribute-rgx=^(_?[A-Z][A-Z0-9_]*|__[a-z0-9_]+__|_?[a-z][a-z0-9_]*)$
+
+# Regular expression matching correct inline iteration names
+inlinevar-rgx=^[a-z][a-z0-9_]*$
+
+# Regular expression matching correct class names
+class-rgx=^_?[A-Z][a-zA-Z0-9]*$
+
+# Regular expression matching correct module names
+module-rgx=^(_?[a-z][a-z0-9_]*|__init__)$
+
+# Regular expression matching correct method names
+method-rgx=(?x)^(?:(?P<exempt>_[a-z0-9_]+__|runTest|setUp|tearDown|setUpTestCase|tearDownTestCase|setupSelf|tearDownClass|setUpClass|(test|assert)_*[A-Z0-9][a-zA-Z0-9_]*|next)|(?P<camel_case>_{0,2}[A-Z][a-zA-Z0-9_]*)|(?P<snake_case>_{0,2}[a-z][a-z0-9_]*))$
+
+# Regular expression which should only match function or class names that do
+# not require a docstring.
+no-docstring-rgx=(__.*__|main|test.*|.*test|.*Test)$
+
+# Minimum line length for functions/classes that require docstrings, shorter
+# ones are exempt.
+docstring-min-length=10
+
+
+[FORMAT]
+
+# Maximum number of characters on a single line.
+max-line-length=132
+
+# TODO(https://github.com/PyCQA/pylint/issues/3352): Direct pylint to exempt
+# lines made too long by directives to pytype.
+
+# Regexp for a line that is allowed to be longer than the limit.
+ignore-long-lines=(?x)(
+  ^\s*(\#\ )?<?https?://\S+>?$|
+  ^\s*(from\s+\S+\s+)?import\s+.+$)
+
+# Allow the body of an if to be on the same line as the test if there is no
+# else.
+single-line-if-stmt=yes
+
+#V# # List of optional constructs for which whitespace checking is disabled. `dict-
+#V# # separator` is used to allow tabulation in dicts, etc.: {1  : 1,\n222: 2}.
+#V# # `trailing-comma` allows a space between comma and closing bracket: (a, ).
+#V# # `empty-line` allows space-only lines.
+#V# no-space-check=
+
+#V# # Maximum number of lines in a module
+#V# max-module-lines=99999
+
+[STRING]
+
+# This flag controls whether inconsistent-quotes generates a warning when the
+# character used as a quote delimiter is used inconsistently within a module.
+check-quote-consistency=yes
+

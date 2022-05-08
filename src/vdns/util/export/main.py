@@ -71,7 +71,7 @@ def doit():
     logging.debug('Output keys directory is %s', keydir)
 
     for net in networks:
-        if not config.doall and not net['network'] in config.networks:
+        if not config.doall and not net['network'].compressed in config.networks:
             continue
 
         do_domain(net['domain'])

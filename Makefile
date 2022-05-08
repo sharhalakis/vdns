@@ -3,7 +3,9 @@ PYCODESTYLE=pycodestyle --max-line-length=132 --ignore=E266
 
 all: lint mypy test
 
-test:
+check: mypy lint tests
+
+tests:
 	@echo
 	@echo Running tests...
 	PYTHONPATH=src/ pytest-3

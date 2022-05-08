@@ -1,13 +1,29 @@
 #!/usr/bin/env python3
 # coding=UTF-8
 #
-
 import time
 import logging
+import datetime
+import dataclasses as dc
 
 import vdns.db
+import vdns.rr
 import vdns.common
 import vdns.src.src0
+
+
+@dc.dataclass
+class DBDNSSEC(vdns.rr.DNSSEC):
+    id: int     # Internal id, not exported
+
+
+@dc.dataclass
+class DBDomain(vdns.rr.Domain):
+    reverse: bool = False
+    ts: int = 0
+    updated: int = 0
+    # ts: datetime.datetime = datetime.datetime.fromtimestamp(0)
+    # updated: datetime.datetime = datetime.date.fromtimestamp(0)
 
 
 class DB(vdns.src.src0.Source):
@@ -15,20 +31,7 @@ class DB(vdns.src.src0.Source):
         vdns.src.src0.Source.__init__(self, domain)
         self.db = vdns.db.get_db()
 
-    # def get_net_hosts(self, net):
-    #     """
-    #     Return all host entries that belong to that network
-    #     """
-    #     query = 'SELECT *, family(ip) AS family FROM hosts WHERE ip << %(net)s'
-    #     args = {'net': net}
-    #
-    #     res = self.db.read_table_raw(query, args)
-    #     for x in res:
-    #         x['ip_str'] = x['ip'].ip.compressed
-    #
-    #     return res
-    #
-    def get_hosts(self):
+    def _get_hosts(self):
         """
         Return the host entries taking care of dynamic entries
 
@@ -56,17 +59,13 @@ class DB(vdns.src.src0.Source):
         if network:
             logging.debug('This is a network zone')
 
-        # print(domain)
-        # soa = vdns.rr.SOA(**{k: v for k, v in domain.items() if k not in ('ts', 'reverse', 'updated')})
-        soa = vdns.rr.make_rr(vdns.rr.SOA, domain)
-
         def _mk(rrtype, data):
             return [vdns.rr.make_rr(rrtype, x) for x in data]
 
         tablemap = {'cnames': vdns.rr.CNAME,
                     'ns': vdns.rr.NS,
                     'mx': vdns.rr.MX,
-                    'dnssec': vdns.rr.DNSSEC,
+                    'dnssec': DBDNSSEC,
                     'txt': vdns.rr.TXT,
                     'sshfp': vdns.rr.SSHFP,
                     'dkim': vdns.rr.DKIM,
@@ -82,15 +81,30 @@ class DB(vdns.src.src0.Source):
         domain['dkim'] = self.db.get_domain_related_data('dkim', dom)
         domain['srv'] = self.db.get_domain_related_data('srv', dom)
 
-        domain2={}
+        def convert_datetime(v):
+            """psycopg2 returns datetime objects. Convert them to seconds (epoch or deltas)."""
+            if isinstance(v, datetime.datetime):
+                ret = int(v.timestamp())
+            elif isinstance(v, datetime.timedelta):
+                ret = int(v.total_seconds())
+            else:
+                ret = v
+            return ret
+
+        def convert_datetime_dict(dt):
+            return {k: convert_datetime(v) for k, v in dt.items()}
+
+        soa = vdns.rr.make_rr(vdns.rr.SOA, convert_datetime_dict(domain))
+        domain2 = {'soa': soa}
         for rrname, data in domain.items():
             if rrname not in tablemap:
                 continue
             rrclass = tablemap[rrname]
-            domain2[rrname] = [vdns.rr.make_rr(rrclass, v) for v in data]
+            domain2[rrname] = [vdns.rr.make_rr(rrclass, convert_datetime_dict(v)) for v in data]
+        # print(domain2)
 
-        print()
-        print("domain2:", domain2)
+        # print()
+        # print('domain2:', domain2)
 
         if domain['reverse']:
             net = network['network']
@@ -99,7 +113,7 @@ class DB(vdns.src.src0.Source):
             domain['network'] = net
         else:
             domain['_domain'] = dom
-            domain['hosts'] = self.get_hosts()
+            domain['hosts'] = self._get_hosts()
             domain['network'] = None
 
         # Also store subdomains
@@ -134,11 +148,11 @@ class DB(vdns.src.src0.Source):
         if domain['reverse']:
             net = network['network']
             domain['_domain'] = vdns.common.reverse_name(net)
-            domain['hosts'] = self.db.get_net_hosts(net)
+            domain['hosts'] = self._get_net_hosts(net)
             domain['network'] = net
         else:
             domain['_domain'] = dom
-            domain['hosts'] = self.get_hosts()
+            domain['hosts'] = self._get_hosts()
             domain['network'] = None
 
         # Also store subdomains
