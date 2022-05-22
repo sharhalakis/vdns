@@ -29,7 +29,7 @@ import vdns.util.config
 import vdns.util.export.config
 
 
-def add_args(parser):
+def add_args(parser: argparse.ArgumentParser) -> None:
     config = vdns.util.export.config.Config()
 
     # Set this as the module config
@@ -63,7 +63,7 @@ def add_args(parser):
                       help='Do all domains and networks')
 
 
-def handle_args(args):
+def handle_args(args: argparse.Namespace) -> None:
     config = vdns.util.config.get_config()
 
     config.domains = args.domains
@@ -85,7 +85,7 @@ def handle_args(args):
         sys.exit(1)
 
 
-def _init_db():
+def _init_db() -> None:
     config = vdns.util.config.get_config()
 
     vdns.db.init_db(
@@ -96,7 +96,7 @@ def _init_db():
     )
 
 
-def init():
+def init() -> None:
     _init_db()
 
 

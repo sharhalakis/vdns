@@ -1,3 +1,4 @@
+import datetime
 import unittest
 import parameterized
 
@@ -28,7 +29,7 @@ class CommonTest(unittest.TestCase):
         ('', ValueError),
         ('something something', ValueError),
     ])
-    def test_reverse_name(self, st: str, result: Union[str, Type]):
+    def test_reverse_name(self, st: str, result: Union[str, Type]) -> None:
 
         if isinstance(result, str):
             r = vdns.common.reverse_name(st)
@@ -38,3 +39,28 @@ class CommonTest(unittest.TestCase):
                 r = vdns.common.reverse_name(st)
         else:
             raise Exception('Error... error... error...')
+
+    @parameterized.parameterized.expand([
+        (datetime.timedelta(seconds=1000), ('1000', '16 minutes, 40 seconds')),
+        (datetime.timedelta(seconds=1200), ('20M', '20 minutes')),
+        (datetime.timedelta(seconds=7200), ('2H', '2 hours')),
+        (datetime.timedelta(100), ('100D', '14 weeks, 2 days')),
+        (datetime.timedelta(100, 1), ('8640001', '14 weeks, 2 days, 1 second')),
+        (datetime.timedelta(14), ('2W', '2 weeks')),
+    ])
+    def test_fmttd(self, dt: datetime.timedelta, output: str) -> None:
+        self.assertEqual(vdns.common.zone_fmttd(dt), vdns.common.FmttdReturn(value=output[0], human_readable=output[1]))
+
+    def test_fmttd_invalid(self) -> None:
+        with self.assertRaises(ValueError):
+            vdns.common.zone_fmttd(datetime.timedelta(0))
+
+    @parameterized.parameterized.expand([
+        ('a b c', 'a b c'),
+        ('abc', 'abc'),
+        ('a   b\tc', 'a b c'),
+        ('   a     b c   ', 'a b c'),
+        ('\ta \t b c \t ', 'a b c'),
+    ])
+    def test_compact_spaces(self, line: str, result: str) -> None:
+        self.assertEqual(vdns.common.compact_spaces(line), result)

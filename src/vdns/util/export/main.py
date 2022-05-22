@@ -29,7 +29,7 @@ import vdns.util.common
 import vdns.util.config
 
 
-def do_domain(domain):
+def do_domain(domain: str) -> None:
     """
     Generate one domain
 
@@ -46,16 +46,15 @@ def do_domain(domain):
 
     r = zm.doit(config.dokeys, config.incserial)
     outf = outdir + '/' + domain
-    vdns.util.common.write_file(outf, r['zone'])
+    vdns.util.common.write_file(outf, r.zone)
 
     if config.dokeys:
-        keys = r['keys']
-        for key in keys:
-            keyf = keydir + '/' + key[1]
-            vdns.util.common.write_file(keyf, key[2], 0o600)
+        for key in r.keys:
+            keyf = keydir + '/' + key[0]
+            vdns.util.common.write_file(keyf, key[1], 0o600)
 
 
-def doit():
+def doit() -> int:
     config = vdns.util.config.get_config()
     ret = 0
 

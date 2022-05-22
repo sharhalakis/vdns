@@ -25,8 +25,11 @@ import os
 import pwd
 import grp
 
+from typing import Optional
 
-def write_file(fn, contents, perms=None, owner=None, group=None):
+
+def write_file(fn: str, contents: str, perms: Optional[int] = None, owner: Optional[str] = None,
+               group: Optional[str] = None) -> None:
     if perms:
         perms2 = perms
     else:

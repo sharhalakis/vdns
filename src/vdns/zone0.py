@@ -3,28 +3,57 @@
 #
 
 import copy
-import logging
-import datetime
+import enum
 import dataclasses as dc
 
 import vdns.rr
+import vdns.src.src0
 import vdns.common
 
-from typing import List, Optional, Tuple
+from typing import Any, Optional, Sequence
+
+# We use this a lot in this file. Must be Sequence and not list/tuple
+RRTypeList = Sequence[Sequence[vdns.rr.RR]]
 
 
 @dc.dataclass
-class Domain:
-    soa: vdns.rr.SOA
-    mx: List[vdns.rr.MX] = dc.field(default_factory=list)
-    ns: List[vdns.rr.NS] = dc.field(default_factory=list)
-    hosts: List[vdns.rr.Host] = dc.field(default_factory=list)
-    cnames: List[vdns.rr.CNAME] = dc.field(default_factory=list)
-    txt: List[vdns.rr.TXT] = dc.field(default_factory=list)
-    dnssec: List[vdns.rr.DNSSEC] = dc.field(default_factory=list)
-    sshfp: List[vdns.rr.SSHFP] = dc.field(default_factory=list)
-    dkim: List[vdns.rr.DKIM] = dc.field(default_factory=list)
-    srv: List[vdns.rr.SRV] = dc.field(default_factory=list)
+class ZoneData:
+
+    @dc.dataclass
+    class Meta:
+        domain: str = ''
+        subsoas: list[vdns.rr.SOA] = dc.field(default_factory=list)
+        network: Optional[vdns.common.IPNetwork] = None
+
+        @property
+        def reverse(self) -> bool:
+            return self.network is not None
+
+    @dc.dataclass
+    class SubdomainData:
+        ns: list[vdns.rr.NS] = dc.field(default_factory=list)
+        ds: list[vdns.rr.DS] = dc.field(default_factory=list)
+        glue: list[vdns.rr.Host] = dc.field(default_factory=list)
+
+    # The raw database data - Maybe delete this
+    dbdata: dict[str, Any] = dc.field(default_factory=dict)
+
+    sources: list[vdns.src.src0.Source] = dc.field(default_factory=list)  # The source objects
+    meta: Meta = dc.field(default_factory=Meta)  # Metadata of the zone
+    soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)    # Zone's SOA. Formerly known as "zone"
+    data: vdns.src.src0.DomainData = dc.field(default_factory=vdns.src.src0.DomainData)  # The actual records
+    subs: dict[str, SubdomainData] = dc.field(default_factory=dict)  # Subdomain data
+
+    @property
+    def main(self) -> Optional[vdns.src.src0.Source]:
+        """Returns the main source object or None."""
+        if not self.sources:
+            return None
+        return self.sources[0]
+
+    @property
+    def reverse(self) -> bool:
+        return self.meta.reverse
 
 
 @dc.dataclass
@@ -32,192 +61,47 @@ class Zone0:
     """
     Base class for producing zone files
     """
-    dt: Domain
+    dt: ZoneData
 
-    def __init__(self, dt: Domain):
+    def __init__(self, dt: ZoneData) -> None:
         self.dt = dt
 
-    def fmttd(self, td: datetime.timedelta) -> Tuple[str, str]:
-        r = vdns.common.zone_fmttd(td)
-        return r.value, r.human_readable
+    def make(self) -> str:
+        raise NotImplementedError
 
-#    def fmttd(self, td: datetime.timedelta) -> Tuple[str, str]:
-#        """
-#        Format a timedelta value to something that's appropriate for
-#        zones
-#        """
+#     def make_ptr_name(self, rec):
+#         """
+#         Format the name of a PTR record (i.e. reverse IPv4 or IPv6)
+#         """
+#         if rec['family'] == 4:
+#             rev = rec['ip_str'].split('.')
+#             rev.reverse()
+#             rev = '.'.join(rev)
+#             ret = rev + '.in-addr.arpa'
+#         elif rec['family'] == 6:
+#             ip2 = rec['ip_str'] + '/128'
+#             ret = vdns.common.reverse_name(ip2)
+#         #            logging.error('Unhandled address family: %s', rec['family'])
+#         #            ret=''
+#         else:
+#             logging.error('Unknown address family: %s', rec['family'])
+#             ret = ''
 #
-#        lst = ((1, '', 'second', 'seconds'),
-#               (60, 'M', 'minute', 'minutes'),
-#               (3600, 'H', 'hour', 'hours'),
-#               (86400, 'D', 'day', 'days'),
-#               (86400 * 7, 'W', 'week', 'weeks'))
+#         # Get rid of the suffix if we can
+#         domain = self.dt['_domain']
+#         if ret[-len(domain):] == domain:
+#             ret = ret[:-len(domain) - 1]
 #
-#        ts = int(td.total_seconds())
-#
-#        if ts == 0:
-#            raise ValueError("Timedelta can't be 0")
-#
-#        # Find the first value that doesn't give an exact result
-#        ent = lst[0]
-#        for i in lst:
-#            if (ts % i[0]) != 0:
-#                break
-#            ent = i
-#
-#        ts_scaled = int(ts / ent[0])
-#        suffix = ent[1]
-#        ret1 = f'{ts_scaled}{suffix}'
-#
-#        # Now form the human readable string
-#        rem = ts
-#        ret2 = []
-#        for i in reversed(lst):
-#            t, rem = divmod(rem, i[0])
-#
-#            if t == 0:
-#                continue
-#
-#            if t == 1:
-#                unit = i[2]
-#            else:
-#                unit = i[3]
-#
-#            st = f'{t} {unit}'
-#
-#            ret2.append(st)
-#
-#            # Speadup
-#            if rem == 0:
-#                break
-#
-#        ret2st = ', '.join(ret2)
-#        ret = (ret1, ret2st)
-#
-#        return ret
+#         return ret
 
-    def make_ptr_name(self, rec):
-        """
-        Format the name of a PTR record (i.e. reverse IPv4 or IPv6)
-        """
-        if rec['family'] == 4:
-            rev = rec['ip_str'].split('.')
-            rev.reverse()
-            rev = '.'.join(rev)
-            ret = rev + '.in-addr.arpa'
-        elif rec['family'] == 6:
-            ip2 = rec['ip_str'] + '/128'
-            ret = vdns.common.reverse_name(ip2)
-        #            logging.error('Unhandled address family: %s', rec['family'])
-        #            ret=''
-        else:
-            logging.error('Unknown address family: %s', rec['family'])
-            ret = ''
+    def make_soa(self) -> str:
+        return self.dt.data.soa.record()
 
-        # Get rid of the suffix if we can
-        domain = self.dt['_domain']
-        if ret[-len(domain):] == domain:
-            ret = ret[:-len(domain) - 1]
-
-        return ret
-
-    def make_soa(self):
-        soa = vdns.rr.make_rr(vdns.rr.SOA, self.dt)
-        return soa.record()
-
-    def make_soa_old(self):
-        """!
-NO        @param incserial    If True then increment the serial number
-        """
-        dt = self.dt
-
-        dt2 = {
-            #            'serial':       self.mkserial(dt, incserial),
-            'serial': dt['serial'],
-            'domain': dt['_domain'],
-            'contact': dt['contact'],
-            'ns0': dt['ns0'],
-        }
-
-        times = ('ttl', 'refresh', 'retry', 'expire', 'minimum')
-        for i in times:
-            t = self.fmttd(dt[i])
-            dt2[i] = t[0]
-            dt2[i + '2'] = t[1]
-
-        st = '''\
-$ORIGIN		%(domain)s.
-$TTL		%(ttl)s	; %(ttl2)s
-@		%(ttl)s	IN	SOA	%(ns0)s. %(contact)s. (
-                                %(serial)-15s ; serial
-                                %(refresh)-15s ; refresh (%(refresh2)s)
-                                %(retry)-15s ; retry (%(retry2)s)
-                                %(expire)-15s ; expire (%(expire2)s)
-                                %(minimum)-15s ; minimum (%(minimum2)s)
-                                )
-
-''' % dt2
-
-        return st
-
-    def fmtrecord(self, name: str, ttl: Optional[datetime.timedelta], rr: str, data: str):
-        return vdns.common.fmtrecord(name, ttl, rr, data)
-
-#    def fmtrecord(self, name: str, ttl: Optional[datetime.timedelta], rr: str, data: str):
-#        """
-#        Format a record
-#
-#        This is a dump function that concatenates data, translating ttl
-#
-#        Use mkrecord instead
-#
-#        @param name     The hostname
-#        @param ttl      The TTL in seconds
-#        @param rr       The type of the record
-#        @param data     A freeform string
-#        @return The formed entry
-#        """
-#
-#        if ttl is None:
-#            ttl2 = ''
-#        else:
-#            t = self.fmttd(ttl)
-#            ttl2 = ' ' + t[0]
-#
-#        # TODO(delme):
-#        # ret = '%-16s%s	IN	%s	%s' % (name, ttl2, rr, data)
-#        ret = f'{name:-16s}{ttl2}	IN	{rr}	{data}'
-#
-#        return ret
-
-    def split_txt(self, data):
-        return vdns.common.split_txt(data)
-
-    # def split_txt(self, data):
-    #     """
-    #     Split TXT data to chunks of max 255 bytes to comply with bind
-    #
-    #     @param data     An unquoted string of arbitrary length
-    #     @return A quoted string to be used as TXT record
-    #     """
-    #     limit = 255
-    #
-    #     items = []
-    #     data2 = copy.deepcopy(data)
-    #     while len(data2) > limit:
-    #         items.append(data2[:limit])
-    #         data2 = data2[limit:]
-    #     items.append(data2)
-    #
-    #     ret = '"' + '" "'.join(items) + '"'
-    #
-    #     return ret
-
+    '''
     def mkrecord(self, rrname: str, rec: dict) -> str:
         types = {
             'mx': vdns.rr.MX,
             'ns': vdns.rr.NS,
-            'ds': vdns.rr.DS,
             'host': vdns.rr.Host,
             'a': vdns.rr.Host,
             'aaaa': vdns.rr.Host,
@@ -233,195 +117,63 @@ $TTL		%(ttl)s	; %(ttl2)s
             'srv': vdns.rr.SRV,
         }
 
-        rr = vdns.rr.make_rr(types[rrname], rec)
+        rr: vdns.rr.RR = vdns.rr.make_rr(types[rrname], rec)
         return rr.record()
+    '''
 
-    def mkrecord_old(self, rr, rec):
-        """
-        Create a record based on RR (the type)
-
-        @param rr   The record type. One of: ns, mx, ds
-        @return The formed entry
-        """
-
-        # If this is true then we will make sure that there is a dot
-        # at the end of the name
-        needsdot = False
-
-        # Allow this to be changed by a type (i.e. PTR)
-        hostname = None
-
-        if rr == 'mx':
-            rrname = 'MX'
-            data = f"{rec['priority']:-4} {rec['mx']}"
-            if rec['mx'].count('.') >= 2:
-                needsdot = True
-        elif rr == 'ns':
-            rrname = 'NS'
-            data = rec['ns']
-            if rec['ns'].count('.') >= 2:
-                needsdot = True
-        elif rr == 'ds':
-            rrname = 'DS'
-            data = []
-            data.append(f"{rec['keyid']} {rec['algorithm']} 1 {rec['digest_sha1']}")
-            data.append(f"{rec['keyid']} {rec['algorithm']} 2 {rec['digest_sha256']}")
-        elif rr == 'a':
-            rrname = 'A'
-            data = rec['ip_str'].split('/')[0]
-        elif rr == 'aaaa':
-            rrname = 'AAAA'
-            data = rec['ip_str'].split('/')[0]
-        elif rr == 'ptr':
-            # TODO: This is broken. We need to inverse the ip
-            # and take care of ipv6 as well
-            rrname = 'PTR'
-            data = f"{rec['hostname']}.{rec['domain']}"
-            hostname = self.make_ptr_name(rec)
-            needsdot = True
-        elif rr in ('cname', 'cnames'):
-            rrname = 'CNAME'
-            data = rec['hostname0']
-            if rec['hostname0'].count('.') >= 2:
-                needsdot = True
-        elif rr == 'txt':
-            rrname = 'TXT'
-            data = f"\"{rec['txt']}\""
-        elif rr == 'dnssec':
-            rrname = 'DNSKEY'
-            if rec['ksk']:
-                flags = 257
-            else:
-                flags = 256
-            #            rec['hostname']=rec['domain']
-            data = f"{flags} 3 {rec['algorithm']} {rec['key_pub']}"
-        elif rr == 'sshfp':
-            rrname = 'SSHFP'
-            data = '%(keytype)d %(hashtype)d %(fingerprint)s' % rec
-        elif rr == 'dkim':
-            rrname = 'TXT'
-            hostname = '%(selector)s._domainkey' % rec
-            if 'hostname' in rec and rec['hostname']:
-                hostname += '.' + rec['hostname']
-            data0 = []
-            data0.append('v=DKIM1')
-            if rec['g'] is not None:
-                data0.append('g=' + rec['g'])
-            data0.append('k=' + rec['k'])
-            data0.append('s=email')
-            if rec['t'] or not rec['subdomains']:
-                if rec['t']:
-                    if rec['subdomains']:
-                        t = 'y'
-                    else:
-                        t = 's:y'
-                else:
-                    t = 's'
-                data0.append('t=' + t)
-            if rec['h'] is not None:
-                data0.append('h=' + rec['h'])
-            data0.append('p=' + rec['key_pub'])
-
-            data = self.split_txt('; '.join(data0))
-        elif rr == 'srv':
-            rrname = 'SRV'
-            hostname = '_%(service)s._%(protocol)s' % rec
-            if rec['name'] != '':
-                hostname += '.' + rec['name']
-            data = '%(priority)s %(weight)s %(port)s %(target)s' % rec
-            if rec['target'].count('.') >= 1:
-                needsdot = True
-        else:
-            vdns.common.abort('Unhandled RR type %s: %s' % (rr, rec))
-
-        if not isinstance(data, list):
-            data = [data]
-
-        if needsdot:
-            for i, _ in enumerate(data):
-                if data[i][-1] != '.':
-                    data[i] += '.'
-
-        if hostname is None:
-            if 'hostname' in rec:
-                hostname = rec['hostname']
-            else:
-                hostname = ''
-
-        if hostname == '.':
-            hostname = ''
-
-        ttl = rec['ttl']
-        # ret=self.fmtrecord(hostname, self.dt['ttl'], rrname, data)
-        ret = ''
-        for d in data:
-            ret += self.fmtrecord(hostname, ttl, rrname, d)
-            ret += '\n'
-
-        return ret
-
-    def make_toplevel(self):
+    def make_toplevel(self) -> str:
         """
         Create the top-level entries.
         These are the entries with empty hostname or hostname=='.'
         """
-
-        lst = ['ns', 'mx', 'dnssec', 'txt']
-
         ret = ''
+        data = self.dt.data
 
-        for typ in lst:
-            if typ not in self.dt:
-                continue
+        reclist: RRTypeList
+        dnskey: list[vdns.rr.DNSKEY] = [vdns.rr.DNSKEY.from_dnssec(x) for x in data.dnssec]
 
-            recs = self.dt[typ]
-
+        # for recs in [data.ns, data.mx, dnskey, data.txt]:
+        reclist = [data.ns, data.mx, dnskey, data.txt]
+        for recs in reclist:
             for rec in recs:
-                if 'hostname' in rec and \
-                        not (rec['hostname'] == '' or rec['hostname'] == '.'):
+                if rec.hostname is not None and rec.hostname not in ('', '.'):
                     continue
+                ret += rec.record()
 
-                ret += self.mkrecord(typ, rec)
-
-        if 'hosts' in self.dt:
-            for rec in self.dt['hosts']:
-                if rec['hostname'] != '':
-                    continue
-
-                ret += self.mkrecord('host', rec)
+        for rec in data.hosts:
+            if rec.hostname != '':
+                continue
+            ret += rec.record()
 
         # Add DKIM and SRV here (last) since they have a host part
-        for x in ('dkim', 'srv'):
-            if x in self.dt:
-                for rec in self.dt[x]:
-                    if rec['hostname'] != '':
-                        continue
-                    ret += self.mkrecord(x, rec)
+        reclist = [data.dkim, data.srv]
+        for recs in reclist:
+            for rec in recs:
+                if rec.hostname != '':
+                    continue
+                ret += rec.record()
 
         return ret
 
-    def make_subzones(self):
+    def make_subzones(self) -> str:
         """
         Create entries that are considered subdomains
         For now these are entries that have NS
         """
 
-        lst = ['ns', 'ds']
-
         ret = ''
         glue = ''
 
-        for sub in sorted(self.dt['subs']):
+        for subsoa in sorted(self.dt.meta.subsoas):
             ret += '\n'
-            for typ in lst:
-                recs = self.dt['subs'][sub][typ]
-
+            subdata: ZoneData.SubdomainData = self.dt.subs[subsoa.name]
+            subsoa_rrs: list[Sequence[vdns.rr.RR]] = [subdata.ns, subdata.ds]
+            for recs in subsoa_rrs:
                 for rec in recs:
-                    ret += self.mkrecord(typ, rec)
+                    ret += rec.record()
 
-            recs = self.dt['subs'][sub]['glue']
-            for rec in recs:
-                glue += self.mkrecord('host', rec)
+            for rec in subdata.glue:
+                glue += rec.record()
 
         if glue != '':
             ret += '\n; Glue records\n'
@@ -429,97 +181,83 @@ $TTL		%(ttl)s	; %(ttl2)s
 
         return ret
 
-    def make_hosts(self):
+    def make_hosts(self) -> str:
         """
         Make the host entries
 
-        Host entries are accompanied with relevant records like CNAMEs,
+        Host entries are accompanied by relevant records like CNAMEs,
         TXTs, etc...
         """
         done = []  # List of entries already handled
         ret = ''
-        subdomaintypes = ['ns']
-        lst = ['txt', 'sshfp']
+
+        rec: vdns.rr.RR
+        recs: Sequence[vdns.rr.RR]
+        reclist: RRTypeList
 
         # Determine entries to be excluded
         # - since we added them previously
-        for typ in subdomaintypes:
-            if typ not in self.dt:
-                continue
-
-            recs = self.dt[typ]
-
-            for rec in recs:
-                t = rec['hostname']
-                if t not in done:
-                    done.append(t)
+        for rec in self.dt.data.ns:
+            if rec.hostname not in done:
+                done.append(rec.hostname)
 
         # Examine all hosts
         #        hosts2=dict([(h['ip'], h) for h in self.dt['hosts']])
         #        ips=hosts2.keys()
         #        ips.sort()
-        for rec in self.dt['hosts']:
-            #        for ip in ips:
-            #            rec=hosts2[ip]
-            hostname = rec['hostname']
+        for rec in self.dt.data.hosts:
+            hostname = rec.hostname
             if hostname == '':
                 continue
 
-            # ip=rec['ip']
-            ret += self.mkrecord('host', rec)
+            ret += rec.record()
 
             if hostname in done:
                 continue
 
             done.append(hostname)
 
+            rec2: vdns.rr.RR
+            recs2: Sequence[vdns.rr.RR]
+            reclist2: RRTypeList
+
             # Add additional info here
-            for typ in lst:
-                if typ not in self.dt:
-                    continue
-
-                recs2 = self.dt[typ]
+            reclist2 = [self.dt.data.txt, self.dt.data.sshfp]
+            for recs2 in reclist2:
                 for rec2 in recs2:
-                    if rec2['hostname'] != hostname:
+                    if rec2.hostname != hostname:
                         continue
-
                     rec3 = copy.deepcopy(rec2)
-                    rec3['hostname'] = ''
-                    ret += self.mkrecord(typ, rec3)
+                    rec3.hostname = ''
+                    ret += rec3.record()
 
             # CNAMEs are special. We look for cnames that are
             # pointing to this host
-            if 'cnames' in self.dt:
-                recs2 = self.dt['cnames']
-                for rec2 in recs2:
-                    if rec2['hostname0'] != hostname:
-                        continue
-
-                    ret += self.mkrecord('cnames', rec2)
-
-                    done.append(rec2['hostname'])
+            for cname in self.dt.data.cnames:
+                if cname.hostname0 != hostname:
+                    continue
+                ret += cname.record()
+                done.append(cname.hostname)
 
             # Add DKIM here (last) as it has a hostname part
-            for rec2 in self.dt['dkim']:
-                if rec2['hostname'] != hostname:
+            for dkim in self.dt.data.dkim:
+                if dkim.hostname != hostname:
                     continue
-
-                ret += self.mkrecord('dkim', rec2)
+                ret += dkim.record()
 
         # Now do the rest cnames
-        rests = ['cnames', 'txt']
-        for rr in rests:
-            if rr in self.dt:
-                ret += '\n'
-                for rec in self.dt[rr]:
-                    if rec['hostname'] == '':
-                        continue
-                    if not rec['hostname'] in done:
-                        ret += self.mkrecord(rr, rec)
+        reclist = [self.dt.data.cnames, self.dt.data.txt]
+        for recs in reclist:
+            ret += '\n'
+            for rec in recs:
+                if rec.hostname == '':
+                    continue
+                if rec.hostname not in done:
+                    ret += rec.record()
 
         return ret
 
-    def make_reverse(self):
+    def make_reverse(self) -> str:
         """
         Make the reverse entries
         """
@@ -530,24 +268,38 @@ $TTL		%(ttl)s	; %(ttl2)s
         # Y is the numerical representation of the address as returned by
         # inet_pton. All of this to be able to sort based on numerical
         # value instead of string representation
-        hosts = {}
-        for x in self.dt['hosts']:
+        # hosts = {}
+        host: vdns.rr.Host
+        hosts: list[vdns.rr.Host] = []
+        for host in self.dt.data.hosts:
             # Skip entries that are not designated as reverse
-            if not x['reverse']:
+            if not host.reverse:
                 continue
 
-            x['net_domain'] = self.dt['_domain']
-            ip = x['ip']
-            k = b'%d-%s' % (ip.version, ip.packed)
-            hosts[k] = x
+            # x['net_domain'] = self.dt['_domain']      # TODO: Is the replacement correct? Is _domain == meta.domain?
+            ptr = vdns.rr.PTR.from_host(host, self.dt.meta.domain)
+            # # k = b'%d-%s' % (host.ip.version, host.ip.packed)
+            # k = b'%d-%b' % (host.ip.version, host.ip.packed)
+            # hosts[k] = ptr
+            hosts.append(ptr)
 
-        for x in sorted(hosts):
-            rec = hosts[x]
-            ret += self.mkrecord('ptr', rec)
+        for rec in sorted(hosts):
+            ret += rec.record()
 
         return ret
 
-    def make_keys(self):
+    @dc.dataclass
+    class MakeKeysItem:
+        class KeyType(enum.Enum):
+            key = 1
+            public = 1
+            private = 2
+
+        keytype: KeyType
+        fn: str
+        st_key: str
+
+    def make_keys(self) -> list[MakeKeysItem]:
         """
         Make the key files
 
@@ -556,18 +308,34 @@ $TTL		%(ttl)s	; %(ttl2)s
         Where type is 'key' or 'private'
         """
 
-        ret = []
+        ret: list[Zone0.MakeKeysItem] = []
 
-        for x in self.dt['dnssec']:
-            fn0 = 'K%s.+%03d+%d' % (x['domain'], x['algorithm'], x['keyid'])
+        x: vdns.rr.DNSSEC
+        for x in self.dt.data.dnssec:
+            # fn0 = 'K%s.+%03d+%d' % (x.domain, x.algorithm, x.keyid)
+            fn0 = f'K{x.domain}.+{x.algorithm:03}+{x.keyid}'
 
-            fn = fn0 + '.key'
-            rec = ('key', fn, x['st_key_pub'])
-            ret.append(rec)
+            item = self.MakeKeysItem(
+                keytype=self.MakeKeysItem.KeyType.public,
+                fn=f'{fn0}.key',
+                st_key=x.st_key_pub,
+            )
+            ret.append(item)
 
-            fn = fn0 + '.private'
-            rec = ('private', fn, x['st_key_priv'])
-            ret.append(rec)
+            item = self.MakeKeysItem(
+                keytype=self.MakeKeysItem.KeyType.private,
+                fn=f'{fn0}.private',
+                st_key=x.st_key_priv,
+            )
+            ret.append(item)
+
+            # fn = fn0 + '.key'
+            # rec = ('key', fn, x['st_key_pub'])
+            # ret.append(rec)
+
+            # fn = fn0 + '.private'
+            # rec = ('private', fn, x['st_key_priv'])
+            # ret.append(rec)
 
         return ret
 

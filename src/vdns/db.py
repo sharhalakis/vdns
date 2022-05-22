@@ -6,24 +6,30 @@ import logging
 import psycopg2
 import psycopg2.extras
 
+import vdns.rr
 import vdns.common
 
 from typing import Any, Optional, Union
 
-_db = None
+_db: Optional['DB'] = None
 
 
 class NoDatabaseConnectionError(Exception):
-    def __init__(self):
+    def __init__(self) -> None:
         Exception.__init__(self, 'No database connection')
+
+
+DBReadRow = dict[str, Any]
+DBReadResults = list[DBReadRow]
+QueryArgs = dict[str, Any]
 
 
 class DB:
 
-    db: psycopg2.extensions.connection
+    db: Optional[psycopg2.extensions.connection]
 
     def __init__(self, dbname: str, dbuser: Optional[str] = None, dbpass: Optional[str] = None,
-                 dbhost: Optional[str] = None, dbport: Optional[str] = None):
+                 dbhost: Optional[str] = None, dbport: Optional[str] = None) -> None:
 
         psycopg2.extras.register_ipaddress()
 
@@ -42,14 +48,16 @@ class DB:
 
         self.db = db
 
-    def close(self):
-        self.db.close()
-        self.db = None
+    def close(self) -> None:
+        if self.db is not None:
+            self.db.close()
+            self.db = None
 
-    def _read_table_raw(self, query, kwargs=None):
+    def _read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
         """
         No logging version
         """
+        assert self.db is not None
         cur = self.db.cursor()
         cur.execute(query, kwargs)
 
@@ -64,14 +72,14 @@ class DB:
 
         return ret
 
-    def read_table_raw(self, query, kwargs=None):
+    def read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
         logging.debug('Executing query: %s', query)
 
         res = self._read_table_raw(query, kwargs)
 
         return res
 
-    def read_table(self, tbl, where=None):
+    def read_table(self, tbl: str, where: Optional[QueryArgs] = None) -> DBReadResults:
         if where is None:
             where = {}
         # Construct the WHERE part
@@ -97,7 +105,7 @@ class DB:
 
         return res
 
-    def read_table_one(self, tbl, where):
+    def read_table_one(self, tbl: str, where: QueryArgs) -> Optional[DBReadRow]:
         r = self.read_table(tbl, where)
 
         if len(r) > 1:
@@ -110,18 +118,19 @@ class DB:
 
         return ret
 
-    def store_serial(self, domain, newserial):
+    def store_serial(self, domain: str, newserial: int) -> None:
         """
         Store a new serial number for a domain and update ts
         """
         query = 'UPDATE domains SET serial=%(newserial)s, ts=updated WHERE name=%(domain)s'
         args = {'domain': domain, 'newserial': newserial}
 
+        assert self.db is not None
         cur = self.db.cursor()
         cur.execute(query, args)
         self.db.commit()
 
-    def is_dynamic(self, domain):
+    def is_dynamic(self, domain: str) -> bool:
         """
         Is this a domain with dynamic entries?
 
@@ -140,8 +149,7 @@ class DB:
             ip = ip.ip
         return ip
 
-
-    def get_domain_related_data(self, tbl, domain, order=None):
+    def get_domain_related_data(self, tbl: str, domain: str, order: Optional[str] = None) -> DBReadResults:
         """
         Return all data from table tbl that are related to domain
         Table should have a column named domain
@@ -163,7 +171,7 @@ class DB:
 
         return res
 
-    def get_subdomains(self, domain):
+    def get_subdomains(self, domain: str) -> DBReadResults:
         """
         Return the direct subdomain records of a domain
         """
@@ -177,7 +185,7 @@ class DB:
 
         return res
 
-    def get_domains(self):
+    def get_domains(self) -> DBReadResults:
         """!
         @return all domains
         """
@@ -185,7 +193,7 @@ class DB:
 
         return ret
 
-    def get_networks(self):
+    def get_networks(self) -> DBReadResults:
         """!
         @return all networks
         """
@@ -193,7 +201,7 @@ class DB:
 
         return ret
 
-    def get_net_hosts(self, net: vdns.common.IPNetwork):
+    def get_net_hosts(self, net: vdns.common.IPNetwork) -> DBReadResults:
         """
         Return all host entries that belong to that network
         """
@@ -210,7 +218,7 @@ class DB:
 # End of class DB
 
 
-def init_db(**kwargs):
+def init_db(**kwargs: Any) -> DB:
     global _db
 
     if _db is not None:
@@ -221,7 +229,7 @@ def init_db(**kwargs):
     return _db
 
 
-def get_db():
+def get_db() -> DB:
     if _db is None:
         raise NoDatabaseConnectionError()
 

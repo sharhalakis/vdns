@@ -3,19 +3,16 @@
 #
 
 import logging
-
 import vdns.zone0
 
 
 class ZoneRev(vdns.zone0.Zone0):
-    def __init__(self, *args, **kwargs):
-        vdns.zone0.Zone0.__init__(self, *args, **kwargs)
 
-    def make(self):
+    def make(self) -> str:
         """!
         @param incserial    If True then increment the serial number
         """
-        logging.debug('Doing network %s - %s', self.dt['network'], self.dt['name'])
+        logging.debug('Doing network %s - %s', self.dt.data.network, self.dt.meta.domain)
 
         st = ''
         st += self.make_soa()

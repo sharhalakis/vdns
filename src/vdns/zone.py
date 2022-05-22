@@ -7,14 +7,12 @@ import vdns.zone0
 
 
 class Zone(vdns.zone0.Zone0):
-    def __init__(self, *args, **kwargs):
-        vdns.zone0.Zone0.__init__(self, *args, **kwargs)
 
-    def make(self):
+    def make(self) -> str:
         """!
         @param incserial    If True then increment the serial number
         """
-        logging.debug('Doing domain %s', self.dt['name'])
+        logging.debug('Doing domain %s', self.dt.data.name)
 
         st = ''
         st += self.make_soa()

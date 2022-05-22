@@ -3,14 +3,12 @@
 #
 
 import re
-# import sys
-# import socket
 import logging
 import datetime
 import ipaddress
 import dataclasses as dc
 
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 IPInterface = Union[ipaddress.IPv4Interface, ipaddress.IPv6Interface]
@@ -18,7 +16,7 @@ IPNetwork = Union[ipaddress.IPv4Network, ipaddress.IPv6Network]
 
 
 class AbortError(Exception):
-    def __init__(self, *args, excode=1, **kwargs):
+    def __init__(self, *args: Any, excode: int = 1, **kwargs: Any):
         """Indicates a program abort with exit code."""
         self.excode = excode
         super().__init__(*args, **kwargs)
@@ -138,10 +136,7 @@ def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str) 
         t = zone_fmttd(ttl)
         ttl2 = ' ' + t.value
 
-    # TODO(delme):
-    # ret = '%-16s%s	IN	%s	%s' % (name, ttl2, rr, data)
     ret = f'{name:16s}{ttl2}	IN	{rr}	{data}'
-    # print(f"name: '{name}', ttl2: '{ttl2}',\tresult: {ret[:100]}")
 
     return ret
 
@@ -173,9 +168,22 @@ def spaces2tabs(st: str) -> str:
     return ret
 
 
-def abort(reason):
+def compact_spaces(st: str) -> str:
+    """Replaces all spaces with a single space and strips leading and trailing spaces."""
+    return re.sub(r'\s+', ' ', st).strip()
+
+
+def abort(reason: str) -> None:
     logging.error('%s', reason)
     raise AbortError(reason, excode=1)
+
+
+def validate_dataclass(d: object) -> None:
+    fields = dc.fields(d)
+    for field in fields:
+        value = getattr(d, field.name)
+        if not isinstance(value, field.type):
+            raise Exception(f'Field {field.name} has value {value} which is not of type {field.type} in: {d}')
 
 
 if __name__ == '__main__':

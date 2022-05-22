@@ -29,6 +29,8 @@ import vdns.common
 import vdns.util.config
 import vdns.util.export
 
+from typing import Optional
+
 od = collections.OrderedDict
 
 modules = od([
@@ -36,12 +38,12 @@ modules = od([
 ])
 
 
-def abort(msg, excode=1):
+def abort(msg: str, excode: int = 1) -> None:
     sys.stderr.write(msg)
     sys.exit(excode)
 
 
-def init_args():
+def init_args() -> None:
     """!
     Parameter handling
 
@@ -78,7 +80,7 @@ def init_args():
         vdns.util.export.args.add_args(parser)
         module = modules[config.util]
     else:
-        abort('Bad utility name: %s' % (config.util,))
+        abort(f'Bad utility name: f{config.util}')
 
     # Parse them
     args = parser.parse_args()
@@ -98,7 +100,9 @@ def init_args():
         if config.what == 'export':
             module = vdns.util.export
         else:
-            abort('Bad action: %s' % (config.what,))
+            abort(f'Bad action: f{config.what}')
+
+    assert module is not None
 
     config.module = module
 
@@ -111,7 +115,7 @@ def init_args():
     module.args.handle_args(args)
 
 
-def init_log():
+def init_log() -> None:
     config = vdns.util.config.get_config()
 
     if config.debug:
@@ -122,7 +126,7 @@ def init_log():
     logging.basicConfig(level=level)
 
 
-def init():
+def init() -> None:
     config = vdns.util.config.get_config()
 
     init_args()
@@ -130,7 +134,7 @@ def init():
     config.module.init()
 
 
-def doit():
+def doit() -> int:
     config = vdns.util.config.get_config()
 
     logging.debug('Doing main')
@@ -139,7 +143,7 @@ def doit():
     return ret
 
 
-def runutil(util):
+def runutil(util: Optional[str]) -> None:
     """!
     Run for a certain utility or for all of them
 

@@ -6,9 +6,9 @@ import ipaddress
 
 from vdns import rr
 
-# from typing import Type, Union
+from typing import Any
 
-# pylint: disable=protected-access
+# pylint: disable=protected-access,unexpected-keyword-arg
 
 # Just a datetime so that we don't repeat this
 a_time = datetime.datetime(year=2000, month=10, day=13, hour=12, minute=0, second=0)
@@ -23,13 +23,13 @@ def clean(st: str) -> str:
 
 class StringRecordTest(unittest.TestCase):
 
-    def test_constructor(self):
+    def test_constructor(self) -> None:
         s = rr._StringRecord('data')
         self.assertEqual(s.st, 'data')
         self.assertIsNone(s.hostname)
         self.assertEqual(s.autodot, 0)
 
-    def test_needsdot(self):
+    def test_needsdot(self) -> None:
         s = rr._StringRecord('data')
         self.assertEqual(s.needsdot, False)
 
@@ -44,7 +44,7 @@ class StringRecordTest(unittest.TestCase):
         s.needsdot = False
         self.assertEqual(s.needsdot, False)
 
-    def test_autodot(self):
+    def test_autodot(self) -> None:
         s = rr._StringRecord('data')
         self.assertEqual(s.needsdot, False)
 
@@ -60,7 +60,7 @@ class StringRecordTest(unittest.TestCase):
 
 class SimpleRRTest(unittest.TestCase):
 
-    def test_mx(self):
+    def test_mx(self) -> None:
         mx = rr.MX(hostname='mail', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                    priority=10, mx='mx1')
         rec = clean(mx.record())
@@ -71,7 +71,7 @@ class SimpleRRTest(unittest.TestCase):
         rec = clean(mx.record())
         self.assertEqual(rec, 'mail IN MX 10 mx1.google.com.')
 
-    def test_ns(self):
+    def test_ns(self) -> None:
         ns = rr.NS(hostname='sub', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                    ns='srv1')
         rec = clean(ns.record())
@@ -82,13 +82,13 @@ class SimpleRRTest(unittest.TestCase):
         rec = clean(ns.record())
         self.assertEqual(rec, 'sub IN NS ns1.google.com.')
 
-    def test_host(self):
+    def test_host(self) -> None:
         host = rr.Host(hostname='srv1', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                        ip=ipaddress.IPv4Address('10.1.1.2'), reverse=False)
         rec = clean(host.record())
-        self.assertEqual(rec, 'srv1 1H IN A 10.1.1.2.')
+        self.assertEqual(rec, 'srv1 1H IN A 10.1.1.2')
 
-    def test_ptr(self):
+    def test_ptr(self) -> None:
         ptr = rr.PTR(hostname='srv1', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                      ip=ipaddress.IPv4Address('10.1.1.2'), reverse=True, net_domain='1.10.in-addr.arpa')
         rec = clean(ptr.record())
@@ -98,7 +98,7 @@ class SimpleRRTest(unittest.TestCase):
         with self.assertRaises(rr.BadRecordError):
             ptr.record()
 
-    def test_cname(self):
+    def test_cname(self) -> None:
         ptr = rr.CNAME(hostname='ns1', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                        hostname0='srv1')
         rec = clean(ptr.record())
@@ -108,18 +108,19 @@ class SimpleRRTest(unittest.TestCase):
         rec = clean(ptr.record())
         self.assertEqual(rec, 'ns1 1H IN CNAME some.host.com.')
 
-    def test_txt(self):
+    def test_txt(self) -> None:
         txt = rr.TXT(hostname='ns1', domain='dom.com', ttl=datetime.timedelta(seconds=3600),
                      txt='ho ho ho')
         rec = clean(txt.record())
         self.assertEqual(rec, 'ns1 1H IN TXT "ho ho ho"')
 
-    def test_dnssec(self):
+    def test_dnssec(self) -> None:
         created = a_time
-        dt = dict(domain='dom.com', keyid=10, ksk=False, algorithm=8,
-                  digest_sha1='digest_sha1', digest_sha256='digest_sha256',
-                  key_pub='AwEpubkey', st_key_pub='pubkey', st_key_priv='privkey',
-                  ts_created=created, ts_activate=created, ts_publish=created)
+        dt: dict[str, Any] = dict(
+            domain='dom.com', keyid=10, ksk=False, algorithm=8,
+            digest_sha1='digest_sha1', digest_sha256='digest_sha256',
+            key_pub='AwEpubkey', st_key_pub='pubkey', st_key_priv='privkey',
+            ts_created=created, ts_activate=created, ts_publish=created)
 
         dnssec = rr.DNSKEY(**dt)
         rec = clean(dnssec.record())
@@ -135,7 +136,7 @@ class SimpleRRTest(unittest.TestCase):
         self.assertIn('sub IN DS 10 8 1 digest_sha1', reclines)
         self.assertIn('sub IN DS 10 8 2 digest_sha256', reclines)
 
-    def test_dkim(self):
+    def test_dkim(self) -> None:
         pubkey = 'pubkey'
         dkim = rr.DKIM(domain='dom.com', selector='google', k='rsa',
                        key_pub=pubkey, g='*', t=False, subdomains=False)
@@ -153,18 +154,17 @@ class SimpleRRTest(unittest.TestCase):
         self.assertEqual(rec, f'google._domainkey IN TXT {txt}')
         self.maxDiff = maxdiff
 
-    def test_srv(self):
+    def test_srv(self) -> None:
         srv = rr.SRV(domain='dom.com', protocol='tcp', service='xmpp-client',
                      priority=5, weight=0, port=5222, target='targethost')
         rec = clean(srv.record())
         self.assertEqual(rec, '_xmpp-client._tcp IN SRV 5 0 5222 targethost')
 
-    def test_soa(self):
+    def test_soa(self) -> None:
         soa = rr.SOA(name='dom.com', ttl=datetime.timedelta(days=1),
                      refresh=datetime.timedelta(hours=24), retry=datetime.timedelta(hours=1),
                      expire=datetime.timedelta(days=30), minimum=datetime.timedelta(minutes=1),
-                     contact='v13@v13.gr', serial=2022050801, ns0='ns1.dom.com',
-                     ts=a_time, reverse=False, updated=a_time)
+                     contact='v13@v13.gr', serial=2022050801, ns0='ns1.dom.com')
 
         rec = soa.record()
         lines = [clean(x) for x in rec.splitlines()]

@@ -2,17 +2,39 @@
 # coding=UTF-8
 #
 
+from typing import Optional
+
 import copy
 import logging
+import dataclasses as dc
 
+import vdns.rr
 import vdns.zone
+import vdns.zone0
+import vdns.common
 import vdns.zonerev
+import vdns.src.src0
 import vdns.src.db
 import vdns.src.dynamic
 
 
+SourceList = list[vdns.src.src0.Source]
+
+
+@dc.dataclass
+class ZoneOutput:
+    # The contents of the zone file
+    zone: str = ''
+    # A list of keys where each entry is a tuple of (key_file_name, data)
+    keys: list[tuple[str, str]] = dc.field(default_factory=list)
+
+
 class ZoneMaker:
-    def __init__(self, domain, zonedir=None):
+    domain: str
+    zonedir: Optional[str]
+    sources: Optional[SourceList]
+
+    def __init__(self, domain: str, zonedir: Optional[str] = None):
         """!
         @param domain   The domain to create config for
         @param zonedir  The directory that stores old zone data, or None
@@ -22,7 +44,7 @@ class ZoneMaker:
         self.zonedir = zonedir
         self.sources = None
 
-    def _mksources(self):
+    def _mksources(self) -> SourceList:
         """!
         Construct a list of sources for a certain domain
 
@@ -39,7 +61,9 @@ class ZoneMaker:
         domain = self.domain
         zonedir = self.zonedir
 
-        ret = []
+        ret: SourceList = []
+
+        source: vdns.src.src0.Source
 
         source = vdns.src.db.DB(domain)
         ret.append(source)
@@ -50,36 +74,21 @@ class ZoneMaker:
 
         return ret
 
-    def get_sources(self):
-        if not self.sources:
+    def get_sources(self) -> SourceList:
+        if self.sources is None:
             self.sources = self._mksources()
 
         return self.sources
 
-    def get_main_source(self):
+    def get_main_source(self) -> vdns.src.src0.Source:
         sources = self.get_sources()
 
         ret = sources[0]
 
         return ret
 
-    def get_zone_data(self, incserial=False):
-        """!
-        returns a dictionary of:
-            - sources   The source objects
-            - main      The main source object (useful for updating the serial)
-            - meta      Metadata of the zone:
-                - _domain   The domain name
-                - reverse   True if this is a reverse zone
-                - subs      Subdomains (the db domain records)
-                - network   The IP network in case of reverse, or None
-            - zone      SOA data
-            - data      The actual records
-            - sub       Subdomain data. Each entry is a dict of:
-                - ns    NS records
-                - ds    DS records
-                - glue  glue records
-
+    def get_zone_data(self, incserial: bool = False) -> Optional[vdns.zone0.ZoneData]:
+        """
         @param incserial    If True then increment the serial number
         @return the combined zone data or None
         """
@@ -89,39 +98,44 @@ class ZoneMaker:
         if not sources:
             return None
 
-        # Cache the data of each source
-        sourcedata = []
+        ret = vdns.zone0.ZoneData()
+        ret.sources = sources
+
+        # Cache the data of each source. The order/index needs to be the same as in sources.
+        sourcedata: list[Optional[vdns.src.src0.DomainData]] = []
         for source in sources:
-            dt = source.get_data()
-            #            if not dt:
-            #                continue
-            sourcedata.append(dt)
+            sourcedata.append(source.get_data())
 
         # Get the main source
         main = sourcedata[0]
+        assert main is not None
 
         # metadata
-        data1 = {
-            '_domain': domain,
-            'reverse': main['reverse'],
-            'subs': main['subs'],
-            'network': main['network'],
-            #            'ts':       main['ts'],
-            #            'updated':  main['updated'],
-        }
+        ret.meta = vdns.zone0.ZoneData.Meta(
+            domain=domain,
+            subsoas=main.subdomains,
+            network=main.network,
+        )
+        # soa
+        ret.soa = main.soa
 
         # Figure out the old serial
         # Serial has to be the max
         max_idx = -1
         serial = -1
-        for idx, _ in enumerate(sources):
-            t_source = sources[idx]
-            t_data = sourcedata[idx]
+#        for idx, _ in enumerate(sources):
+#            t_data = sourcedata[idx]
+#            if not t_data:
+#                continue
+#            if t_data['serial'] > serial:
+#                max_idx = idx
+#                serial = t_data['serial']
+        for idx, t_data in enumerate(sourcedata):
             if not t_data:
                 continue
-            if t_data['serial'] > serial:
+            if t_data.serial > serial:
                 max_idx = idx
-                serial = t_data['serial']
+                serial = t_data.serial
         oldserial = serial
         logging.debug('Old serial: %d', oldserial)
 
@@ -142,48 +156,34 @@ class ZoneMaker:
             for source in sources:
                 source.set_serial(serial)
 
-        # zonedata - common for all sources. Get them from the main source
-        data2 = {
-            'contact': main['contact'],
-            'expire': main['expire'],
-            'minimum': main['minimum'],
-            'name': main['name'],
-            'ns0': main['ns0'],
-            'refresh': main['refresh'],
-            'retry': main['retry'],
-            'serial': serial,
-            'ttl': main['ttl'],
-        }
-
         # data to be combined
-        data3 = {
-            'cnames': [],
-            'dkim': [],
-            'dnssec': [],
-            'hosts': [],
-            'mx': [],
-            'ns': [],
-            'srv': [],
-            'sshfp': [],
-            'txt': [],
-        }
+        # _data3 = {
+        #     'cnames': [],
+        #     'dkim': [],
+        #     'dnssec': [],
+        #     'hosts': [],
+        #     'mx': [],
+        #     'ns': [],
+        #     'srv': [],
+        #     'sshfp': [],
+        #     'txt': [],
+        # }
+
+        # dom = vdns.src.src0.DomainData(domain, soa=soa)
+        ret.data.name = domain
+        ret.data.soa = main.soa
 
         # Combine data
-        for dt in sourcedata:
-            if not dt:
+        for srcdt in sourcedata:
+            if not srcdt:
                 continue
-            for k in data3:
-                if k not in dt:
-                    continue
-                data3[k] += dt[k]
+            ret.data += srcdt
 
         # Get subdomain data
-        subs = {}
-
-        for sub in data1['subs']:
-            subname = sub['name']
+        for subsoa in ret.meta.subsoas:
+            subname = subsoa.name
             ldom = len(domain)
-            if subname[-ldom:] != domain:
+            if not subname.endswith(f'.{domain}'):
                 logging.error('WTF? Bad subdomain: %s - %s', domain, subname)
                 raise Exception('Something went bad')
 
@@ -191,13 +191,9 @@ class ZoneMaker:
             dt = subz.get_zone_data()
             if dt is None:
                 continue
-            dt = dt['data']
 
-            subdata = {
-                'ns': [],
-                'ds': [],
-                'glue': [],
-            }
+            subdata = vdns.zone0.ZoneData.SubdomainData()
+            ret.subs[subname] = subdata
 
             # This will give us the 'host' part
             # For subdomain of hell.gr named test1.test2.hell.gr, this
@@ -205,24 +201,25 @@ class ZoneMaker:
             h = subname[:-(ldom + 1)]
 
             # Get DS info for all KSK DNSSEC entries of that domain
-            for ds in dt['dnssec']:
-                if ds['ksk']:
-                    ds['hostname'] = h
-                    subdata['ds'].append(ds)
+            for dnssec in dt.data.dnssec:
+                if dnssec.ksk:
+                    ds = vdns.rr.DS.from_dnssec(dnssec)
+                    ds.hostname = h
+                    subdata.ds.append(ds)
 
             # Get NS entries for that domain as well
-            for ns in dt['ns']:
-                ns['hostname'] = h
-                subdata['ns'].append(ns)
+            for ns in dt.data.ns:
+                ns.hostname = h
+                subdata.ns.append(ns)
 
                 # Get the glue records - if any
-                if not ns['ns'].endswith('.' + ns['domain']):
+                if not ns.ns.endswith(f'.{ns.domain}'):
                     continue
 
                 # Iterate over hosts to find appropriate records
-                for host in dt['hosts']:
-                    host2 = host['hostname'] + '.' + host['domain']
-                    if ns['ns'] != host2:
+                for host in dt.data.hosts:
+                    host2 = f'{host.hostname}.{host.domain}'
+                    if ns.ns != host2:
                         continue
                     # Figure out the hostname part by removing the current
                     # domain from the host's FQDN
@@ -231,30 +228,19 @@ class ZoneMaker:
                     # Create another record with appropriate
                     # domain and hostname entries
                     rec = copy.deepcopy(host)
-                    rec['domain'] = domain
-                    rec['hostname'] = ns2
-                    subdata['glue'].append(rec)
-
-            subs[h] = subdata
-
-        ret = {
-            'sources': sources,
-            'main': main,
-            'meta': data1,
-            'zone': data2,
-            'data': data3,
-            'subs': subs,
-        }
+                    rec.domain = domain
+                    rec.hostname = ns2
+                    subdata.glue.append(rec)
 
         return ret
 
-    def incserial(self):
-        """! Increase the serial number of the main source """
-        logging.debug('Incrementing serial number of %s', self.domain)
-        main = self.get_main_source()
-        main.incserial()
+    # def incserial(self) -> None:
+    #     """! Increase the serial number of the main source """
+    #     logging.debug('Incrementing serial number of %s', self.domain)
+    #     main = self.get_main_source()
+    #     main.incserial()
 
-    def doit(self, keys=False, incserial=False):
+    def doit(self, keys: bool = False, incserial: bool = False) -> ZoneOutput:
         """!
         Generate zone files
 
@@ -267,32 +253,25 @@ class ZoneMaker:
         @param incserial    If True then increment the serial number
         @return a dictionary as specified above
         """
-        data0 = self.get_zone_data(incserial=incserial)
+        data = self.get_zone_data(incserial=incserial)
 
-        # print sorted(data0[0].keys())
+        if not data:
+            raise Exception('Failed to get data')
 
-        # The Zone classes require all data in one dictionary.
-        # Combine them
-        data = {}
-        data.update(data0['meta'])
-        data.update(data0['zone'])
-        data.update(data0['data'])
-        data['subs'] = data0['subs']
+        z: vdns.zone0.Zone0
 
-        if data['reverse']:
+        if data.reverse:
             z = vdns.zonerev.ZoneRev(data)
         else:
             z = vdns.zone.Zone(data)
 
-        st = z.make()
-
-        ret = {
-            'zone': st,
-        }
-
+        ret = ZoneOutput()
+        ret.zone = z.make()
         if keys:
-            t = z.make_keys()
-            ret['keys'] = t
+            zone_keys = z.make_keys()
+            ret.keys = []
+            for key in zone_keys:
+                ret.keys.append((key.fn, key.st_key))
 
         return ret
 

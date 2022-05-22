@@ -3,37 +3,66 @@
 #
 import time
 import logging
-import datetime
-import dataclasses as dc
-
 import vdns.db
 import vdns.rr
 import vdns.common
 import vdns.src.src0
 
-
-@dc.dataclass
-class DBDNSSEC(vdns.rr.DNSSEC):
-    id: int     # Internal id, not exported
+from typing import Any, Optional, Type, TypeVar, Union
 
 
-@dc.dataclass
-class DBDomain(vdns.rr.Domain):
-    reverse: bool = False
-    ts: int = 0
-    updated: int = 0
-    # ts: datetime.datetime = datetime.datetime.fromtimestamp(0)
-    # updated: datetime.datetime = datetime.date.fromtimestamp(0)
+# Maps DB tables to RR records for get_domain_related_data
+RR_TABLEMAP: dict[str, Type[vdns.rr.RR]] = {
+    'cnames': vdns.rr.CNAME,
+    'dkim': vdns.rr.DKIM,
+    'dnssec': vdns.rr.DNSSEC,
+    # 'domain': vdns.rr.SOA,
+    'hosts': vdns.rr.Host,
+    'mx': vdns.rr.MX,
+    'ns': vdns.rr.NS,
+    'srv': vdns.rr.SRV,
+    'sshfp': vdns.rr.SSHFP,
+    'txt': vdns.rr.TXT,
+}
+
+
+# @dc.dataclass
+# class DBDNSSEC(vdns.rr.DNSSEC):
+#     id: int     # Internal id, not exported
+
+
+# @dc.dataclass
+# class DBDomainData(vdns.src.src0.DomainData):
+#     # reverse: bool = False
+#     ts: int = 0
+#     updated: int = 0
+#     # ts: datetime.datetime = datetime.datetime.fromtimestamp(0)
+#     # updated: datetime.datetime = datetime.date.fromtimestamp(0)
+
+T_RR_SOA = TypeVar('T_RR_SOA', bound=Union[vdns.rr.RR, vdns.rr.SOA])
 
 
 class DB(vdns.src.src0.Source):
-    def __init__(self, domain):
+    db: vdns.db.DB
+
+    def __init__(self, domain: str):
         vdns.src.src0.Source.__init__(self, domain)
         self.db = vdns.db.get_db()
 
-    def _get_hosts(self):
-        """
-        Return the host entries taking care of dynamic entries
+    def _mkrr(self, data: vdns.db.DBReadResults, rrtype: Type[vdns.rr.T_RR_SOA]) -> list[vdns.rr.T_RR_SOA]:
+        """Converts a list of results to RR records, converting datetime entries first."""
+        return [vdns.rr.make_rr(rrtype, x) for x in data]
+
+    # TODO: Figure out how to return a non-Any
+    def _get_domain_related_data(self, tbl: str, domain: str, order: Optional[str] = None) -> Any:
+        """Gets db data and returns RR records."""
+        if tbl not in RR_TABLEMAP:
+            raise Exception(f'Unknown table {tbl}')
+        data = self.db.get_domain_related_data(tbl, domain, order)
+        return self._mkrr(data, RR_TABLEMAP[tbl])
+
+    def _get_hosts(self) -> vdns.db.DBReadResults:
+        """Returns the host entries taking care of dynamic entries
 
         Dynamic entries that exist in the hosts table will not be included.
         Dynamic entries will get their values from the zone file
@@ -43,11 +72,7 @@ class DB(vdns.src.src0.Source):
 
         return hosts
 
-    def get_data(self):
-        return self.get_data_test()
-
-    # Testing for vdns.rr
-    def get_data_test(self):
+    def get_data(self) -> Optional[vdns.src.src0.DomainData]:
         dom = self.domain
 
         logging.debug('Reading data for: %s', dom)
@@ -56,117 +81,47 @@ class DB(vdns.src.src0.Source):
         domain = self.db.read_table_one('domains', {'name': dom})
         network = self.db.read_table_one('networks', {'domain': dom})
 
-        if network:
-            logging.debug('This is a network zone')
-
-        def _mk(rrtype, data):
-            return [vdns.rr.make_rr(rrtype, x) for x in data]
-
-        tablemap = {'cnames': vdns.rr.CNAME,
-                    'ns': vdns.rr.NS,
-                    'mx': vdns.rr.MX,
-                    'dnssec': DBDNSSEC,
-                    'txt': vdns.rr.TXT,
-                    'sshfp': vdns.rr.SSHFP,
-                    'dkim': vdns.rr.DKIM,
-                    'srv': vdns.rr.SRV,
-                    }
-
-        domain['cnames'] = self.db.get_domain_related_data('cnames', dom)
-        domain['ns'] = self.db.get_domain_related_data('ns', dom)
-        domain['mx'] = self.db.get_domain_related_data('mx', dom)
-        domain['dnssec'] = self.db.get_domain_related_data('dnssec', dom)
-        domain['txt'] = self.db.get_domain_related_data('txt', dom)
-        domain['sshfp'] = self.db.get_domain_related_data('sshfp', dom)
-        domain['dkim'] = self.db.get_domain_related_data('dkim', dom)
-        domain['srv'] = self.db.get_domain_related_data('srv', dom)
-
-        def convert_datetime(v):
-            """psycopg2 returns datetime objects. Convert them to seconds (epoch or deltas)."""
-            if isinstance(v, datetime.datetime):
-                ret = int(v.timestamp())
-            elif isinstance(v, datetime.timedelta):
-                ret = int(v.total_seconds())
-            else:
-                ret = v
-            return ret
-
-        def convert_datetime_dict(dt):
-            return {k: convert_datetime(v) for k, v in dt.items()}
-
-        soa = vdns.rr.make_rr(vdns.rr.SOA, convert_datetime_dict(domain))
-        domain2 = {'soa': soa}
-        for rrname, data in domain.items():
-            if rrname not in tablemap:
-                continue
-            rrclass = tablemap[rrname]
-            domain2[rrname] = [vdns.rr.make_rr(rrclass, convert_datetime_dict(v)) for v in data]
-        # print(domain2)
-
-        # print()
-        # print('domain2:', domain2)
-
-        if domain['reverse']:
-            net = network['network']
-            domain['_domain'] = vdns.common.reverse_name(net)
-            domain['hosts'] = self.db.get_net_hosts(net)
-            domain['network'] = net
-        else:
-            domain['_domain'] = dom
-            domain['hosts'] = self._get_hosts()
-            domain['network'] = None
-
-        # Also store subdomains
-        subs = self.db.get_subdomains(dom)
-        domain['subs'] = subs
-
-        ret = domain
-
-        return ret
-
-    def get_data_orig(self):
-        dom = self.domain
-
-        logging.debug('Reading data for: %s', dom)
-
-        # Get zone data
-        domain = self.db.read_table_one('domains', {'name': dom})
-        network = self.db.read_table_one('networks', {'domain': dom})
+        if domain is None:
+            logging.debug('No domain data for %s', dom)
+            return None
 
         if network:
             logging.debug('This is a network zone')
 
-        domain['cnames'] = self.db.get_domain_related_data('cnames', dom)
-        domain['ns'] = self.db.get_domain_related_data('ns', dom)
-        domain['mx'] = self.db.get_domain_related_data('mx', dom)
-        domain['dnssec'] = self.db.get_domain_related_data('dnssec', dom)
-        domain['txt'] = self.db.get_domain_related_data('txt', dom)
-        domain['sshfp'] = self.db.get_domain_related_data('sshfp', dom)
-        domain['dkim'] = self.db.get_domain_related_data('dkim', dom)
-        domain['srv'] = self.db.get_domain_related_data('srv', dom)
+        ret = vdns.src.src0.DomainData(serial=domain['serial'])
 
         if domain['reverse']:
-            net = network['network']
-            domain['_domain'] = vdns.common.reverse_name(net)
-            domain['hosts'] = self._get_net_hosts(net)
-            domain['network'] = net
+            if network is None:
+                raise Exception(f'Reverse domain "{dom} without a network entry')
+            ret.name = vdns.common.reverse_name(network['network'])
+            ret.network = network['network']
+            hosts = self.db.get_net_hosts(network['network'])
         else:
-            domain['_domain'] = dom
-            domain['hosts'] = self._get_hosts()
-            domain['network'] = None
+            ret.name = dom
+            hosts = self._get_hosts()
+
+        ret.hosts = self._mkrr(hosts, vdns.rr.Host)
+        ret.soa = vdns.rr.make_rr(vdns.rr.SOA, domain)
+        ret.cnames = self._get_domain_related_data('cnames', dom)
+        ret.ns = self._get_domain_related_data('ns', dom)
+        ret.mx = self._get_domain_related_data('mx', dom)
+        ret.dnssec = self._get_domain_related_data('dnssec', dom)
+        ret.txt = self._get_domain_related_data('txt', dom)
+        ret.sshfp = self._get_domain_related_data('sshfp', dom)
+        ret.dkim = self._get_domain_related_data('dkim', dom)
+        ret.srv = self._get_domain_related_data('srv', dom)
 
         # Also store subdomains
         subs = self.db.get_subdomains(dom)
-        domain['subs'] = subs
-
-        ret = domain
+        ret.subdomains = self._mkrr(subs, vdns.rr.SOA)
 
         return ret
 
-    def has_changed(self):
+    def has_changed(self) -> bool:
         domain = self.domain
 
         dt = self.db.read_table_one('domains', {'name': domain})
+        assert dt is not None
 
         # old=dt['serial']
 
@@ -190,7 +145,7 @@ class DB(vdns.src.src0.Source):
 
         return ret
 
-    def incserial(self, oldserial):
+    def incserial(self, oldserial: int) -> int:
         """! Increment the serial number if needed.
 
         @param oldserial    Old serial (ignored)
@@ -200,7 +155,7 @@ class DB(vdns.src.src0.Source):
 
         return ret
 
-    def set_serial(self, serial):
+    def set_serial(self, serial: int) -> None:
         domain = self.domain
 
         logging.debug('Storing serial number for %s: %s', domain, serial)

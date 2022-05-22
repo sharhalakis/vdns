@@ -2,13 +2,12 @@
 #
 
 import enum
-import logging
 import datetime
 import dataclasses as dc
 
 import vdns.common
 
-from typing import Any, Dict, Optional, Sequence, Type, Union
+from typing import Any, Dict, Optional, Sequence, Type, TypeVar, Union
 
 
 class BadRecordError(Exception):
@@ -17,6 +16,7 @@ class BadRecordError(Exception):
 
 
 class _StringRecord:
+    """Holds the resulting RR string, plus a few related information. Used as a return type for make_string()."""
     st: str
     # Override the hostname
     hostname: Optional[str]
@@ -64,6 +64,9 @@ class RR:
     def rrfields(self) -> list[str]:
         return [x.name for x in dc.fields(self)]
 
+    def validate(self) -> None:
+        vdns.common.validate_dataclass(self)
+
     def make_string(self, records: Sequence[_StringRecord]) -> str:
         ret = ''
 
@@ -98,11 +101,19 @@ class RR:
         raise NotImplementedError()
 
     def record(self) -> str:
+        self.validate()
         records = self._records()
         if not isinstance(records, Sequence):
             records = [records]
 
         return self.make_string(records)
+
+    def __lt__(self, other: 'RR') -> bool:
+        if self.hostname is None:
+            return True
+        if other.hostname is None:
+            return False
+        return self.hostname < other.hostname
 
 
 @dc.dataclass
@@ -131,16 +142,15 @@ class NS(RR):
 @dc.dataclass
 class Host(RR):
     ip: vdns.common.IPAddress
-    reverse: bool
+    reverse: Optional[bool]
 
     @property
-    def rrname(self):
+    def rrname(self) -> str:
         if self.ip.version == 4:
             return 'A'
-        elif self.ip.version == 6:
+        if self.ip.version == 6:
             return 'AAAA'
-        else:
-            raise BadRecordError('Unsupported IP version', self)
+        raise BadRecordError('Unsupported IP version', self)
 
     def _records(self) -> _StringRecord:
         return _StringRecord(self.ip.compressed)
@@ -151,16 +161,16 @@ class PTR(Host):
     net_domain: str
 
     @property
-    def rrname(self):
+    def rrname(self) -> str:
         return self._rrname()
 
     def _records(self) -> _StringRecord:
         data = f'{self.hostname}.{self.domain}'
 
         if not self.reverse:
-            raise BadRecordError("PTR attempted for non-reverse", self)
+            raise BadRecordError('PTR attempted for non-reverse', self)
         if self.ip.version not in (4, 6):
-            raise BadRecordError("Bad IP version", self)
+            raise BadRecordError('Bad IP version', self)
 
         rev = self.ip.reverse_pointer
 
@@ -169,6 +179,18 @@ class PTR(Host):
         hostname = rev.removesuffix(f'.{self.net_domain}')
 
         return _StringRecord(data, hostname=hostname, needsdot=True)
+
+    @classmethod
+    def from_host(cls, host: Host, net_domain: str) -> 'PTR':
+        return cls(net_domain=net_domain, **dc.asdict(host))
+
+    # def __lt__(self, other: 'PTR') -> bool:
+    def __lt__(self, other: 'RR') -> bool:
+        assert isinstance(other, PTR)
+        # IPv4 before IPv6, then normal order based on the packed version
+        s1 = b'%d-%b' % (self.ip.version, self.ip.packed)
+        s2 = b'%d-%b' % (other.ip.version, other.ip.packed)
+        return s1 < s2
 
 
 @dc.dataclass
@@ -201,9 +223,9 @@ class DNSSEC(RR):
     ts_created: datetime.datetime
     ts_activate: datetime.datetime
     ts_publish: datetime.datetime
-    # ts_created: datetime.datetime
-    # ts_activate: datetime.datetime
-    # ts_publish: datetime.datetime
+
+    def _records(self) -> Union[_StringRecord, list[_StringRecord]]:
+        raise NotImplementedError
 
 
 @dc.dataclass
@@ -218,6 +240,11 @@ class DNSKEY(DNSSEC):
 
         return _StringRecord(data)
 
+    @classmethod
+    def from_dnssec(cls, dnssec: DNSSEC) -> 'DNSKEY':
+        """Constructs a DNSKEY class from a DNSSEC class."""
+        return DNSKEY(**dc.asdict(dnssec))
+
 
 @dc.dataclass
 class DS(DNSSEC):
@@ -226,6 +253,11 @@ class DS(DNSSEC):
         ret.append(_StringRecord(f'{self.keyid} {self.algorithm} 1 {self.digest_sha1}'))
         ret.append(_StringRecord(f'{self.keyid} {self.algorithm} 2 {self.digest_sha256}'))
         return ret
+
+    @classmethod
+    def from_dnssec(cls, dnssec: DNSSEC) -> 'DS':
+        """Constructs a DS class from a DNSSEC class."""
+        return DS(**dc.asdict(dnssec))
 
 
 @dc.dataclass
@@ -303,15 +335,15 @@ class SRV(RR):
 
 @dc.dataclass
 class SOA:
-    name: str
-    ttl: datetime.timedelta
-    refresh: datetime.timedelta
-    retry: datetime.timedelta
-    expire: datetime.timedelta
-    minimum: datetime.timedelta
-    contact: str
-    serial: int
-    ns0: str
+    name: str = ''
+    ttl: datetime.timedelta = datetime.timedelta(days=1)
+    refresh: datetime.timedelta = datetime.timedelta(hours=24)
+    retry: datetime.timedelta = datetime.timedelta(hours=1)
+    expire: datetime.timedelta = datetime.timedelta(days=90)
+    minimum: datetime.timedelta = datetime.timedelta(minutes=1)
+    contact: str = ''
+    serial: int = 1
+    ns0: str = ''
 #    ts: datetime.datetime
 #    reverse: bool
 #    updated: Optional[datetime.datetime] = None
@@ -337,24 +369,14 @@ $TTL		{ttl.value}	; {ttl.human_readable}
 '''
         return vdns.common.spaces2tabs(ret)
 
-
-@dc.dataclass
-class Domain:
-    name: str
-    # reverse: bool = False
-    soa: SOA
-    mx: list[MX] = dc.field(default_factory=list)
-    ns: list[NS] = dc.field(default_factory=list)
-    hosts: list[Host] = dc.field(default_factory=list)
-    cnames: list[CNAME] = dc.field(default_factory=list)
-    txt: list[TXT] = dc.field(default_factory=list)
-    dnssec: list[DNSKEY] = dc.field(default_factory=list)
-    sshfp: list[SSHFP] = dc.field(default_factory=list)
-    dkim: list[DKIM] = dc.field(default_factory=list)
-    srv: list[SRV] = dc.field(default_factory=list)
+    def __lt__(self, other: 'SOA') -> bool:
+        return self.name < other.name
 
 
-def make_rr(rrtype: Union[Type[RR], Type[SOA]], data: Dict[Any, Any], eat=True) -> RR:
+T_RR_SOA = TypeVar('T_RR_SOA', bound=Union[RR, SOA])
+
+
+def make_rr(rrtype: Union[Type[T_RR_SOA]], data: Dict[Any, Any], eat: bool = True) -> T_RR_SOA:
     """Constructs an RR from a dictionary, ignoring extra entries in the dict."""
     fields = [x.name for x in dc.fields(rrtype)]
     data2 = {k: v for k, v in data.items() if not eat or k in fields}
@@ -369,6 +391,6 @@ if __name__ == '__main__':
          'refresh': td(3600), 'retry': td(600), 'expire': td(86400), 'minimum': td(60),
          'serial': 100, 'ns0': 'ns1.v13.gr', 'ts': datetime.datetime.now(), 'reverse': False,
          'nothing': 'something'}
-    soa = make_rr(SOA, s)
+    soa: SOA = make_rr(SOA, s)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
