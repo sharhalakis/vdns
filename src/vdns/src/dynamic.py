@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
 import os
 import errno
 import logging
@@ -47,10 +44,7 @@ class Dynamic(vdns.src.src0.Source):
         """
         Return the dynamic entries of a domain
         """
-        query = """SELECT * FROM dynamic WHERE domain=%(domain)s"""
-        args = {'domain': self.domain}
-
-        res = self.db.read_table_raw(query, args)
+        res = self.db.get_domain_related_data('dynamic', self.domain)
 
         return res
 
@@ -234,20 +228,5 @@ class Dynamic(vdns.src.src0.Source):
         pass
 
 # End of class Dynamic
-
-# if __name__=="__main__":
-#    vdns.db.init_db(
-#        dbname  = 'dns',
-#        dbuser  = 'v13',
-#        dbhost  = 'my.db.host'
-#    )
-#
-#    import pprint
-#
-#    zone='dyn.example.com'
-#    dyn=Dynamic(zone, '/etc/bind/db', zone)
-#    dt=dyn.get_data()
-#
-#    pprint.pprint(dt)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

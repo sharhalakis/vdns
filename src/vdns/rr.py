@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-#
-
 import enum
 import datetime
 import dataclasses as dc
+import ipaddress
 
 import vdns.common
 
@@ -93,8 +91,6 @@ class RR:
             ret += vdns.common.fmtrecord(hostname, self.ttl, rrname, rec.st)
             ret += '\n'
 
-        ret = vdns.common.spaces2tabs(ret)
-
         return ret
 
     def _records(self) -> Union[_StringRecord, list[_StringRecord]]:
@@ -107,6 +103,10 @@ class RR:
             records = [records]
 
         return self.make_string(records)
+
+    @property
+    def sort_key(self) -> Any:
+        return self.hostname
 
     def __lt__(self, other: 'RR') -> bool:
         if self.hostname is None:
@@ -155,6 +155,16 @@ class Host(RR):
     def _records(self) -> _StringRecord:
         return _StringRecord(self.ip.compressed)
 
+    @property
+    def as_ipv6(self) -> ipaddress.IPv6Address:
+        if self.ip.version == 6:
+            return self.ip
+        return ipaddress.IPv6Address(f'::{self.ip.compressed}')
+
+    @property
+    def sort_key(self) -> Any:
+        return self.as_ipv6
+
 
 @dc.dataclass
 class PTR(Host):
@@ -165,7 +175,10 @@ class PTR(Host):
         return self._rrname()
 
     def _records(self) -> _StringRecord:
-        data = f'{self.hostname}.{self.domain}'
+        if self.hostname:
+            data = f'{self.hostname}.{self.domain}'
+        else:
+            data = self.domain
 
         if not self.reverse:
             raise BadRecordError('PTR attempted for non-reverse', self)
@@ -184,7 +197,6 @@ class PTR(Host):
     def from_host(cls, host: Host, net_domain: str) -> 'PTR':
         return cls(net_domain=net_domain, **dc.asdict(host))
 
-    # def __lt__(self, other: 'PTR') -> bool:
     def __lt__(self, other: 'RR') -> bool:
         assert isinstance(other, PTR)
         # IPv4 before IPv6, then normal order based on the packed version
@@ -199,6 +211,12 @@ class CNAME(RR):
 
     def _records(self) -> _StringRecord:
         return _StringRecord(self.hostname0, autodot=2)
+
+    @property
+    def sort_key(self) -> Any:
+        if self.hostname.endswith('_domainkey'):
+            return f'zzzz_{self.hostname}'
+        return self.hostname
 
 
 @dc.dataclass
@@ -355,19 +373,26 @@ class SOA:
         expire = vdns.common.zone_fmttd(self.expire)
         minimum = vdns.common.zone_fmttd(self.minimum)
 
+        ttl2 = vdns.common.tabify(ttl.value, 8)
+        serial2 = vdns.common.tabify(str(self.serial), 16)
+        refresh2 = vdns.common.tabify(refresh.value, 16)
+        retry2 = vdns.common.tabify(retry.value, 16)
+        expire2 = vdns.common.tabify(expire.value, 16)
+        minimum2 = vdns.common.tabify(minimum.value, 16)
+
         ret = f'''\
-$ORIGIN		{self.name}.
-$TTL		{ttl.value}	; {ttl.human_readable}
-@		{ttl.value}	IN	SOA	{self.ns0}. {self.contact}. (
-                                {self.serial:<15} ; serial
-                                {refresh.value:<15} ; refresh ({refresh.human_readable})
-                                {retry.value:<15} ; retry ({retry.human_readable})
-                                {expire.value:<15} ; expire ({expire.human_readable})
-                                {minimum.value:<15} ; minimum ({minimum.human_readable})
-                                )
+$ORIGIN\t\t\t{self.name}.
+$TTL\t\t\t{ttl2}; {ttl.human_readable}
+@\t\t\t{ttl2}IN	SOA	{self.ns0}. {self.contact}. (
+\t\t\t\t\t{serial2} ; serial
+\t\t\t\t\t{refresh2} ; refresh ({refresh.human_readable})
+\t\t\t\t\t{retry2} ; retry ({retry.human_readable})
+\t\t\t\t\t{expire2} ; expire ({expire.human_readable})
+\t\t\t\t\t{minimum2} ; minimum ({minimum.human_readable})
+\t\t\t\t\t)
 
 '''
-        return vdns.common.spaces2tabs(ret)
+        return ret
 
     def __lt__(self, other: 'SOA') -> bool:
         return self.name < other.name
@@ -381,16 +406,5 @@ def make_rr(rrtype: Union[Type[T_RR_SOA]], data: Dict[Any, Any], eat: bool = Tru
     fields = [x.name for x in dc.fields(rrtype)]
     data2 = {k: v for k, v in data.items() if not eat or k in fields}
     return rrtype(**data2)  # type: ignore
-
-
-if __name__ == '__main__':
-    def td(i: int) -> datetime.timedelta:
-        return datetime.timedelta(seconds=i)
-
-    s = {'domain': 'v13.gr', 'contact': 'v13@v13.gr', 'ttl': td(3600),
-         'refresh': td(3600), 'retry': td(600), 'expire': td(86400), 'minimum': td(60),
-         'serial': 100, 'ns0': 'ns1.v13.gr', 'ts': datetime.datetime.now(), 'reverse': False,
-         'nothing': 'something'}
-    soa: SOA = make_rr(SOA, s)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

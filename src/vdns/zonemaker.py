@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
-
 from typing import Optional
 
 import copy
@@ -110,12 +106,8 @@ class ZoneMaker:
         main = sourcedata[0]
         assert main is not None
 
-        # metadata
-        ret.meta = vdns.zone0.ZoneData.Meta(
-            domain=domain,
-            subsoas=main.subdomains,
-            network=main.network,
-        )
+        # invoked domain name
+        ret.domain = domain
         # soa
         ret.soa = main.soa
 
@@ -123,13 +115,6 @@ class ZoneMaker:
         # Serial has to be the max
         max_idx = -1
         serial = -1
-#        for idx, _ in enumerate(sources):
-#            t_data = sourcedata[idx]
-#            if not t_data:
-#                continue
-#            if t_data['serial'] > serial:
-#                max_idx = idx
-#                serial = t_data['serial']
         for idx, t_data in enumerate(sourcedata):
             if not t_data:
                 continue
@@ -156,22 +141,9 @@ class ZoneMaker:
             for source in sources:
                 source.set_serial(serial)
 
-        # data to be combined
-        # _data3 = {
-        #     'cnames': [],
-        #     'dkim': [],
-        #     'dnssec': [],
-        #     'hosts': [],
-        #     'mx': [],
-        #     'ns': [],
-        #     'srv': [],
-        #     'sshfp': [],
-        #     'txt': [],
-        # }
-
-        # dom = vdns.src.src0.DomainData(domain, soa=soa)
         ret.data.name = domain
         ret.data.soa = main.soa
+        ret.data.network = main.network
 
         # Combine data
         for srcdt in sourcedata:
@@ -180,7 +152,7 @@ class ZoneMaker:
             ret.data += srcdt
 
         # Get subdomain data
-        for subsoa in ret.meta.subsoas:
+        for subsoa in main.subdomains:
             subname = subsoa.name
             ldom = len(domain)
             if not subname.endswith(f'.{domain}'):
@@ -192,7 +164,7 @@ class ZoneMaker:
             if dt is None:
                 continue
 
-            subdata = vdns.zone0.ZoneData.SubdomainData()
+            subdata = vdns.zone0.ZoneData.SubdomainData(soa=subsoa)
             ret.subs[subname] = subdata
 
             # This will give us the 'host' part
@@ -274,28 +246,5 @@ class ZoneMaker:
                 ret.keys.append((key.fn, key.st_key))
 
         return ret
-
-# if __name__=='__main__':
-#     import vdns.db
-#     import pprint
-#
-#     logging.basicConfig(level=logging.DEBUG)
-#
-#     vdns.db.init_db(
-#         dbname = 'dns',
-#         dbuser = 'v13',
-#         dbhost = 'db.host'
-#     )
-#
-#     domain='example.com'
-#     domain='10.in-addr.arpa'
-#
-#     zm=ZoneMaker(domain, zonedir='/etc/bind/db')
-#
-#     pprint.pprint(zm.doit())
-#
-# #    init()
-# #    doit()
-# #    end()
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

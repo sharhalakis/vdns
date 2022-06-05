@@ -12,12 +12,11 @@ class ZoneRev(vdns.zone0.Zone0):
         """!
         @param incserial    If True then increment the serial number
         """
-        logging.debug('Doing network %s - %s', self.dt.data.network, self.dt.meta.domain)
+        logging.info('Doing network %s - %s', self.dt.data.network, self.dt.domain)
 
         st = ''
         st += self.make_soa()
         st += self.make_toplevel()  # TBD
-        #        pprint(self.dt)
         st += '\n'
         st += self.make_reverse()
 

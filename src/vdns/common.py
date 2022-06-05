@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
-
 import re
 import logging
 import datetime
@@ -116,6 +112,29 @@ def zone_fmttd(td: datetime.timedelta) -> FmttdReturn:
     return ret
 
 
+def tabify(st: str, width: int) -> str:
+    """Adds tabs at the end of a string.
+
+    Ensures that the string has as many tabs at its end as needed to reach "width".
+    Always adds a tab at the end, even if len(st) >= width.
+
+    Args:
+        st: The string to add tabs to.
+        width: The width to add padding to. Must be a multiple of 8.
+    Returns:
+        The padded string.
+    """
+    assert width % 8 == 0
+    if len(st) >= width:
+        # Ensure some empty space at the end
+        return f'{st}\t'
+    padding = width - len(st)
+    tabcount = padding // 8
+    if padding % 8 > 0:
+        tabcount += 1
+    return st + ('\t' * tabcount)
+
+
 def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str) -> str:
     """Formats a record.
 
@@ -134,9 +153,13 @@ def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str) 
         ttl2 = ''
     else:
         t = zone_fmttd(ttl)
-        ttl2 = ' ' + t.value
+        ttl2 = t.value
 
-    ret = f'{name:16s}{ttl2}	IN	{rr}	{data}'
+    name = tabify(name, 24)
+    ttl2 = tabify(ttl2, 8)
+    rr = tabify(rr, 8)
+
+    ret = f'{name}{ttl2}IN\t{rr}{data}'
 
     return ret
 
@@ -158,13 +181,6 @@ def split_txt(data: str) -> str:
 
     ret = '"' + '" "'.join(items) + '"'
 
-    return ret
-
-
-def spaces2tabs(st: str) -> str:
-    # ret = st.expandtabs()
-    ret = st
-    ret = ret.replace('        ', '\t')
     return ret
 
 

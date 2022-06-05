@@ -65,6 +65,10 @@ def init_args() -> None:
                         default=config.debug,
                         help='Enable debugging')
 
+    parser.add_argument('--info', action='store_true',
+                        default=config.info,
+                        help='Enable informational messages')
+
     if config.util is None:
         sub = parser.add_subparsers(dest='what')
 
@@ -87,6 +91,7 @@ def init_args() -> None:
 
     # Handle top-level parameters
     config.debug = args.debug
+    config.info = args.info
 
     if config.util:
         config.what = config.util
@@ -120,6 +125,8 @@ def init_log() -> None:
 
     if config.debug:
         level = logging.DEBUG
+    elif config.info:
+        level = logging.INFO
     else:
         level = logging.WARNING
 

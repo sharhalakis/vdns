@@ -36,7 +36,7 @@ class CommonTest(unittest.TestCase):
             self.assertEqual(r, result)
         elif issubclass(result, Exception):
             with self.assertRaises(result):
-                r = vdns.common.reverse_name(st)
+                _ = vdns.common.reverse_name(st)
         else:
             raise Exception('Error... error... error...')
 
@@ -64,3 +64,18 @@ class CommonTest(unittest.TestCase):
     ])
     def test_compact_spaces(self, line: str, result: str) -> None:
         self.assertEqual(vdns.common.compact_spaces(line), result)
+
+    @parameterized.parameterized.expand([
+        ('test', 8, 'test\t'),
+        ('test', 24, 'test\t\t\t'),
+        ('', 8, '\t'),
+        ('', 16, '\t\t'),
+        ('12345678', 8, '12345678\t'),
+        ('12345678', 16, '12345678\t'),
+    ])
+    def test_tabify(self, st: str, width: int, out: str) -> None:
+        self.assertEqual(vdns.common.tabify(st, width), out)
+
+    def test_tabify_bad(self) -> None:
+        with self.assertRaises(Exception):
+            vdns.common.tabify('test', 15)

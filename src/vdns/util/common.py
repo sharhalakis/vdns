@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
 # Copyright (c) 2014-2015 Stefanos Harhalakis <v13@v13.gr>
 #
 # This file is part of vdns
@@ -24,6 +21,7 @@
 import os
 import pwd
 import grp
+import logging
 
 from typing import Optional
 
@@ -35,7 +33,7 @@ def write_file(fn: str, contents: str, perms: Optional[int] = None, owner: Optio
     else:
         perms2 = 0o666
 
-    fd = os.open(fn, os.O_CREAT | os.O_RDWR, perms2)
+    fd = os.open(fn, os.O_CREAT | os.O_RDWR | os.O_TRUNC, perms2)
 
     # Bypass umask
     if perms:
@@ -60,6 +58,8 @@ def write_file(fn: str, contents: str, perms: Optional[int] = None, owner: Optio
     f.write(contents)
 
     f.close()
+
+    logging.debug('Wrote %d bytes to %s', len(contents), fn)
 
 
 if __name__ == '__main__':

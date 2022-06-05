@@ -2,7 +2,6 @@ import re
 import datetime
 import unittest
 import ipaddress
-# import parameterized
 
 from vdns import rr
 
@@ -93,6 +92,16 @@ class SimpleRRTest(unittest.TestCase):
                      ip=ipaddress.IPv4Address('10.1.1.2'), reverse=True, net_domain='1.10.in-addr.arpa')
         rec = clean(ptr.record())
         self.assertEqual(rec, '2.1 1H IN PTR srv1.dom.com.')
+
+        ptr.reverse = False
+        with self.assertRaises(rr.BadRecordError):
+            ptr.record()
+
+    def test_ptr_empty_host(self) -> None:
+        ptr = rr.PTR(hostname='', domain='dom.com', ip=ipaddress.IPv4Address('10.1.1.2'), reverse=True,
+                     net_domain='1.10.in-addr.arpa')
+        rec = clean(ptr.record())
+        self.assertEqual(rec, '2.1 IN PTR dom.com.')
 
         ptr.reverse = False
         with self.assertRaises(rr.BadRecordError):

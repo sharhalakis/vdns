@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
-
 import sys
 import struct
 import base64
@@ -55,18 +51,11 @@ class ParsedLine:
     rr: str = ''
     addr2: str = ''
 
-    def count(self) -> int:
-        return sum([bool(self.addr1),
-                    bool(self.addr2),
-                    bool(self.rr),
-                    self.ttl is not None,
-                    ])
-
 
 @dc.dataclass
 class Entry:
     addr1: Optional[str] = ''
-    ttl: Optional[int] = None   # As read. E.g., 1D, 2W
+    ttl: Optional[int] = None
     rr: str = ''
     addr2: str = ''
 
@@ -439,36 +428,6 @@ class ZoneParser:
         else:
             logging.info('Unhandled %s: %r', r.rr, r)
 
-    # def add_entry_old(self, r: Entry):
-    #     if r.rr == 'PTR':
-    #         logging.info('Ignoring PTR: %r', r)
-    #     elif r.rr in ('A', 'AAAA'):
-    #         dt = [r.addr1, r.addr2, r.ttl]
-    #         if r.rr == 'A':
-    #             self.dt['a'].append(dt)
-    #         else:
-    #             self.dt['aaaa'].append(dt)
-    #     elif r.rr == 'CNAME':
-    #         dt = [r.addr1, r.addr2, r.ttl]
-    #         self.dt['cname'].append(dt)
-    #     elif r.rr == 'NS':
-    #         # Don't do NS records for a zone here (i.e. when r.addr1!='')
-    #         # We will collect them from the zone itself (i.e when r.addr1=='')
-    #         if r.addr1 is not None and r.addr1 != '':
-    #             logging.info('Skipping NS record for %s', r.addr1)
-    #         else:
-    #             dt = [r.addr2, r.ttl]
-    #             self.dt['ns'].append(dt)
-    #     elif r.rr == 'TXT':
-    #         dt = [r.addr1, r.addr2, r.ttl]
-    #         self.dt['txt'].append(dt)
-    #     elif r.rr == 'MX':
-    #         t = r.addr2.split(None, 1)
-    #         dt = [r.addr1, int(t[0]), t[1], r.ttl]
-    #         self.dt['mx'].append(dt)
-    #     else:
-    #         logging.info('Unhandled %s: %r', r.rr, r)
-
     def _read_file(self, fn: str) -> Optional[list[str]]:
         """Reads the contents of a file, to be mocked in tests."""
         try:
@@ -487,17 +446,6 @@ class ZoneParser:
         domain: str = ''
         insoa = False
 
-        # soa = {
-        #     'name': None,
-        #     'defttl': None,
-        #     'refresh': None,
-        #     'retry': None,
-        #     'expire': None,
-        #     'minimum': None,
-        #     'contact': None,
-        #     'serial': None,
-        #     'ns0': None,
-        # }
         soastr = ''
 
         if zone is not None:
@@ -682,186 +630,6 @@ class ZoneParser:
             self.add_entry(entry)
 
     #            handle_entry(domain, r2)
-
-    '''
-    def read_old(self, fn:str, zone: Optional[str] = None) -> None:
-        """
-        @param zone     Optional zone name. If None then the SOA name is used.
-        """
-
-        lastname = None
-        domain = None
-        insoa = False
-
-        soa = {
-            'name': None,
-            'defttl': None,
-            'refresh': None,
-            'retry': None,
-            'expire': None,
-            'minimum': None,
-            'contact': None,
-            'serial': None,
-            'ns0': None,
-        }
-        soastr = ''
-
-        if zone is not None:
-            domain = zone.strip('.')
-            soa['name'] = domain
-
-        self.dt['domain'] = domain
-
-        defttl = -1
-        soattl = None
-
-        r: ParsedLine
-
-        try:
-            f = open(fn, encoding='ASCII')  # pylint: disable=consider-using-with
-        except OSError:
-            logging.error('Failed to open file: %s', fn)
-            return
-
-        for line0 in f:
-            # Remove comments etc...
-            line = cleanup_line(line0)
-
-            # Handle special entries
-            if line[:4] == '$TTL':
-                t = line.split()
-                defttl = parse_ttl(t[1])
-                self.dt['defttl'] = defttl
-                continue
-
-            # If we are in SOA then concatenate the lines until we find a )
-            # Then parse the resulting line
-            #
-            # Don't attempt to parse intermediate SOA lines. Remember that
-            # the first line is already parsed.
-            #
-            # This logic fails if the whole SOA is on one line and there is
-            # no empty/comment line after that.
-            if insoa:
-                soastr += ' '
-                soastr += line
-
-                # The end
-                if ')' in soastr:
-                    insoa = False
-
-                    r = parse_line(soastr)
-                    # msg(repr(r))
-
-                    if r.ttl is None:
-                        ttl = None
-                    else:
-                        ttl = parse_ttl(r.ttl)
-
-                    # Sample r.addr2
-                    #  hell.gr. root.hell.gr. ( 2012062203 24H 1H 1W 1H )
-                    # After removal of ( and ):
-                    #  hell.gr. root.hell.gr. 2012062203 24H 1H 1W 1H
-                    # Fields:
-                    #  0: ns0
-                    #  1: contact
-                    #  2: serial
-                    #  3: refresh
-                    #  4: retry
-                    #  5: expire
-                    #  6: minimum
-
-                    t = r.addr2.replace('(', '').replace(')', '').split()
-
-                    #                    if domain.strip('.')!=t[0].strip('.'):
-                    #                        error('Domain doesn't match! (%s - %s)' % \
-                    #                            (domain, t[0]))
-
-                    if ttl is None:
-                        ttl = defttl
-
-                    soattl = ttl
-
-                    self.dt['soa'] = {
-                        'name': domain,
-                        'contact': t[1],
-                        'serial': t[2],
-                        'ttl': ttl,
-                        'refresh': parse_ttl(t[3]),
-                        'retry': parse_ttl(t[4]),
-                        'expire': parse_ttl(t[5]),
-                        'minimum': parse_ttl(t[6]),
-                        'ns0': t[0],
-                        'reverse': False
-                    }
-                #                    ins_soa(name=domain, contact=t[1], serial=t[2], ttl=ttl,
-                #                        refresh=t[3], retry=t[4], expire=t[5], minimum=t[6],
-                #                        ns0=t[0], reverse=False)
-
-                continue
-
-            r = parse_line(line)
-
-            if r is None:
-                continue
-
-            if r.rr == 'SOA':
-                # domain=r[4].split()[0]
-                if r.addr1 != '@':
-                    if r.addr1 != domain:
-                        error(f"Domain doesn't match! ({domain} - {r.addr1})")
-
-                domain = zone
-                lastname = None
-
-                logging.debug('Domain: %s', domain)
-
-                insoa = True
-                soastr = line
-
-                continue
-
-            if lastname is None and (r.addr1 is None or r.addr1 == '@'):
-                # msg('Zone entry: ' + repr(r))
-                lastname = None
-            elif r.addr1 is not None:
-                lastname = r.addr1
-
-            # For reverse we only need the soa
-            if self.is_reverse:
-                continue
-
-            # r2 = [lastname] + list(r[1:])
-            entry = Entry(addr1=lastname, rr=r.rr, addr2=r.addr2)
-            entryttl = r.ttl
-
-            # Set TTL:
-            #   If TTL if not specified:
-            #       If current ttl (based on $TTL) is same as SOAs then
-            #       leave TTL==None
-            #       If current ttl<>SOA's ttl then set ttl as the current ttl
-            #   If TTL is specified:
-            #       If it is same as SOAs then set it to NULL
-            #       Else use the specified TTL
-            #
-            # TTL is r2[1]
-            if entryttl is None:
-                if soattl != defttl:
-                    entryttl = defttl
-
-            # Don't convert this to 'else'. This way it will catch cases
-            # where r2[1]==None (initially) and soattl!=defttl. In that case
-            # r2[1] will become non-null and will be rexamined in case it
-            # matches the soattl
-            if entryttl is not None:
-                entry.ttl = parse_ttl(entryttl)
-                if entry.ttl == soattl:
-                    entry.ttl = None
-
-            self.add_entry(entry)
-
-    #            handle_entry(domain, r2)
-    '''
 
     def show(self) -> None:
         """

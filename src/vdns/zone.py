@@ -12,7 +12,7 @@ class Zone(vdns.zone0.Zone0):
         """!
         @param incserial    If True then increment the serial number
         """
-        logging.debug('Doing domain %s', self.dt.data.name)
+        logging.info('Doing domain %s', self.dt.data.name)
 
         st = ''
         st += self.make_soa()

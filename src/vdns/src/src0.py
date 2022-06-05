@@ -16,7 +16,6 @@ class DomainData:
     name: str = ''
     serial: int = 1
     network: Optional[vdns.common.IPNetwork] = None
-    # reverse: bool = False
     soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)
     mx: list[vdns.rr.MX] = dc.field(default_factory=list)
     ns: list[vdns.rr.NS] = dc.field(default_factory=list)

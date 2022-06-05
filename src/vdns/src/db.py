@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# coding=UTF-8
-#
 import time
 import logging
 import vdns.db
@@ -9,7 +6,6 @@ import vdns.common
 import vdns.src.src0
 
 from typing import Any, Optional, Type, TypeVar, Union
-
 
 # Maps DB tables to RR records for get_domain_related_data
 RR_TABLEMAP: dict[str, Type[vdns.rr.RR]] = {
@@ -24,20 +20,6 @@ RR_TABLEMAP: dict[str, Type[vdns.rr.RR]] = {
     'sshfp': vdns.rr.SSHFP,
     'txt': vdns.rr.TXT,
 }
-
-
-# @dc.dataclass
-# class DBDNSSEC(vdns.rr.DNSSEC):
-#     id: int     # Internal id, not exported
-
-
-# @dc.dataclass
-# class DBDomainData(vdns.src.src0.DomainData):
-#     # reverse: bool = False
-#     ts: int = 0
-#     updated: int = 0
-#     # ts: datetime.datetime = datetime.datetime.fromtimestamp(0)
-#     # updated: datetime.datetime = datetime.date.fromtimestamp(0)
 
 T_RR_SOA = TypeVar('T_RR_SOA', bound=Union[vdns.rr.RR, vdns.rr.SOA])
 
@@ -163,20 +145,5 @@ class DB(vdns.src.src0.Source):
         self.db.store_serial(domain, serial)
 
 # End of class DB
-
-# if __name__=="__main__":
-#     vdns.db.init_db(
-#         dbname  = 'dns',
-#         dbuser  = 'v13',
-#         dbhost  = 'my.db.host'
-#     )
-#
-#     import pprint
-#
-# #    db=DB('10.in-addr.arpa')
-#     db=DB('example.com')
-#     dt=db.get_data()
-#
-# #    pprint.pprint(dt)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

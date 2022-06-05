@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
-
 # Config works as follows:
 # - There are two configs: The global(util) config and the per-module
 #   config. Each one is an object with attributes. To access the config
@@ -26,6 +22,7 @@ class Config:
     util: Optional[str] = None  # The pre-set utility
 
     debug: bool = False  # Enable debugging
+    info: bool = False  # Enable informational messages
     what: Optional[str] = None  # The action
     module: Optional[str] = None  # The acting module
 

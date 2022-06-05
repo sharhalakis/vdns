@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# coding=UTF-8
-#
-
 import copy
 import enum
 import dataclasses as dc
@@ -20,26 +16,18 @@ RRTypeList = Sequence[Sequence[vdns.rr.RR]]
 class ZoneData:
 
     @dc.dataclass
-    class Meta:
-        domain: str = ''
-        subsoas: list[vdns.rr.SOA] = dc.field(default_factory=list)
-        network: Optional[vdns.common.IPNetwork] = None
-
-        @property
-        def reverse(self) -> bool:
-            return self.network is not None
-
-    @dc.dataclass
     class SubdomainData:
+        soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)
         ns: list[vdns.rr.NS] = dc.field(default_factory=list)
         ds: list[vdns.rr.DS] = dc.field(default_factory=list)
         glue: list[vdns.rr.Host] = dc.field(default_factory=list)
+
+    domain: str = ''
 
     # The raw database data - Maybe delete this
     dbdata: dict[str, Any] = dc.field(default_factory=dict)
 
     sources: list[vdns.src.src0.Source] = dc.field(default_factory=list)  # The source objects
-    meta: Meta = dc.field(default_factory=Meta)  # Metadata of the zone
     soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)    # Zone's SOA. Formerly known as "zone"
     data: vdns.src.src0.DomainData = dc.field(default_factory=vdns.src.src0.DomainData)  # The actual records
     subs: dict[str, SubdomainData] = dc.field(default_factory=dict)  # Subdomain data
@@ -53,7 +41,7 @@ class ZoneData:
 
     @property
     def reverse(self) -> bool:
-        return self.meta.reverse
+        return self.data.reverse
 
 
 @dc.dataclass
@@ -69,57 +57,8 @@ class Zone0:
     def make(self) -> str:
         raise NotImplementedError
 
-#     def make_ptr_name(self, rec):
-#         """
-#         Format the name of a PTR record (i.e. reverse IPv4 or IPv6)
-#         """
-#         if rec['family'] == 4:
-#             rev = rec['ip_str'].split('.')
-#             rev.reverse()
-#             rev = '.'.join(rev)
-#             ret = rev + '.in-addr.arpa'
-#         elif rec['family'] == 6:
-#             ip2 = rec['ip_str'] + '/128'
-#             ret = vdns.common.reverse_name(ip2)
-#         #            logging.error('Unhandled address family: %s', rec['family'])
-#         #            ret=''
-#         else:
-#             logging.error('Unknown address family: %s', rec['family'])
-#             ret = ''
-#
-#         # Get rid of the suffix if we can
-#         domain = self.dt['_domain']
-#         if ret[-len(domain):] == domain:
-#             ret = ret[:-len(domain) - 1]
-#
-#         return ret
-
     def make_soa(self) -> str:
         return self.dt.data.soa.record()
-
-    '''
-    def mkrecord(self, rrname: str, rec: dict) -> str:
-        types = {
-            'mx': vdns.rr.MX,
-            'ns': vdns.rr.NS,
-            'host': vdns.rr.Host,
-            'a': vdns.rr.Host,
-            'aaaa': vdns.rr.Host,
-            'ptr': vdns.rr.PTR,
-            'cname': vdns.rr.CNAME,
-            'cnames': vdns.rr.CNAME,
-            'txt': vdns.rr.TXT,
-            'dnskey': vdns.rr.DNSKEY,
-            'dnssec': vdns.rr.DNSKEY,
-            'ds': vdns.rr.DS,
-            'sshfp': vdns.rr.SSHFP,
-            'dkim': vdns.rr.DKIM,
-            'srv': vdns.rr.SRV,
-        }
-
-        rr: vdns.rr.RR = vdns.rr.make_rr(types[rrname], rec)
-        return rr.record()
-    '''
 
     def make_toplevel(self) -> str:
         """
@@ -140,10 +79,11 @@ class Zone0:
                     continue
                 ret += rec.record()
 
-        for rec in data.hosts:
-            if rec.hostname != '':
-                continue
-            ret += rec.record()
+        if not self.dt.reverse:
+            for rec in data.hosts:
+                if rec.hostname != '':
+                    continue
+                ret += rec.record()
 
         # Add DKIM and SRV here (last) since they have a host part
         reclist = [data.dkim, data.srv]
@@ -164,9 +104,8 @@ class Zone0:
         ret = ''
         glue = ''
 
-        for subsoa in sorted(self.dt.meta.subsoas):
+        for _, subdata in sorted(self.dt.subs.items()):
             ret += '\n'
-            subdata: ZoneData.SubdomainData = self.dt.subs[subsoa.name]
             subsoa_rrs: list[Sequence[vdns.rr.RR]] = [subdata.ns, subdata.ds]
             for recs in subsoa_rrs:
                 for rec in recs:
@@ -205,21 +144,38 @@ class Zone0:
         #        hosts2=dict([(h['ip'], h) for h in self.dt['hosts']])
         #        ips=hosts2.keys()
         #        ips.sort()
-        for rec in self.dt.data.hosts:
+        for rec in sorted(self.dt.data.hosts, key=lambda x: x.sort_key):
             hostname = rec.hostname
             if hostname == '':
                 continue
-
-            ret += rec.record()
 
             if hostname in done:
                 continue
 
             done.append(hostname)
 
+            # First do IP addresses
             rec2: vdns.rr.RR
             recs2: Sequence[vdns.rr.RR]
             reclist2: RRTypeList
+
+            # The first one includes the hostname part so handle it separately
+            is_first: bool = True
+            # Do 'A' first, then 'AAAA'
+            for rrname in ('A', 'AAAA'):
+                for host in self.dt.data.hosts:
+                    if host.hostname != hostname:
+                        continue
+                    if host.rrname != rrname:
+                        continue
+
+                    if is_first:
+                        ret += host.record()
+                        is_first = False
+                    else:
+                        host2 = copy.deepcopy(host)
+                        host2.hostname = ''
+                        ret += host2.record()
 
             # Add additional info here
             reclist2 = [self.dt.data.txt, self.dt.data.sshfp]
@@ -249,7 +205,7 @@ class Zone0:
         reclist = [self.dt.data.cnames, self.dt.data.txt]
         for recs in reclist:
             ret += '\n'
-            for rec in recs:
+            for rec in sorted(recs, key=lambda x: x.sort_key):
                 if rec.hostname == '':
                     continue
                 if rec.hostname not in done:
@@ -271,13 +227,13 @@ class Zone0:
         # hosts = {}
         host: vdns.rr.Host
         hosts: list[vdns.rr.Host] = []
-        for host in self.dt.data.hosts:
+        for host in sorted(self.dt.data.hosts, key=lambda x: x.as_ipv6):
             # Skip entries that are not designated as reverse
             if not host.reverse:
                 continue
 
-            # x['net_domain'] = self.dt['_domain']      # TODO: Is the replacement correct? Is _domain == meta.domain?
-            ptr = vdns.rr.PTR.from_host(host, self.dt.meta.domain)
+            # x['net_domain'] = self.dt['_domain']      # TODO: Is the replacement correct? Is _domain == domain?
+            ptr = vdns.rr.PTR.from_host(host, self.dt.domain)
             # # k = b'%d-%s' % (host.ip.version, host.ip.packed)
             # k = b'%d-%b' % (host.ip.version, host.ip.packed)
             # hosts[k] = ptr

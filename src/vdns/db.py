@@ -60,23 +60,13 @@ class DB:
         assert self.db is not None
         cur = self.db.cursor()
         cur.execute(query, kwargs)
+        colnames = [x.name for x in cur.description]
 
-        ret = []
-        for x in cur:
-            dt = {}
-            for idx, desc in enumerate(cur.description):
-                dt[desc.name] = x[idx]
-#            for idx in range(len(cur.description)):
-#                dt[cur.description[idx].name] = x[idx]
-            ret.append(dt)
-
-        return ret
+        return [dict(zip(colnames, x)) for x in cur]
 
     def read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
         logging.debug('Executing query: %s', query)
-
         res = self._read_table_raw(query, kwargs)
-
         return res
 
     def read_table(self, tbl: str, where: Optional[QueryArgs] = None) -> DBReadResults:
