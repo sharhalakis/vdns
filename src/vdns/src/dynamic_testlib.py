@@ -34,17 +34,8 @@ def init() -> dict[str, Any]:
     patchers['os.path.exists'] = p
     p.start()
 
-    # This should be patched using db_testlib
-    # p = mock.patch.object(vdns.db, 'get_db')
-    # patchers['vdns.db.get_db'] = p
-    # p.start()
-
     p = mock.patch.object(vdns.zoneparser.ZoneParser, '_read_file', side_effect=_mock_read_file)
     patchers['zoneparser.ZoneParser._read_file'] = p
     p.start()
-
-    # p = mock.patch.object(vdns.src.dynamic.Dynamic, 'get_dynamic', side_effect=_mock_get_dynamic)
-    # patchers['dynamic.Dynamic.get_dynamic'] = p
-    # p.start()
 
     return patchers
