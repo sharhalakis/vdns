@@ -257,6 +257,7 @@ def add_test_data() -> None:
         [('v13.gr', 'apps', 'ghs.google.com.', None),
          ('v13.gr', 'www', 'host1', None),
          ('v13.gr', 'ldap', 'host2.v13.gr.', datetime.timedelta(days=30)),
+         ('sub.v13.gr', 'ns1', 'host1', None),
          ])
     db.set_data_tuples(
         'hosts',
@@ -272,6 +273,8 @@ def add_test_data() -> None:
          ('2001:db8:2c1:12::1', 'v13.gr', 'host3', True, None),
          ('2001:db8:2c1:13::1', 'v13.gr', 'host4', False, None),  # Two hostnames with the same IP
          ('2001:db8:2c1:13::1', 'v13.gr', 'host5', True, None),
+         ('10.1.2.1', 'sub.v13.gr', 'host1', True, None),
+         ('10.1.2.2', 'sub.v13.gr', 'ns2', True, None),
          ])
     db.set_data_tuples(
         'sshfp',
@@ -289,8 +292,9 @@ def add_test_data() -> None:
         # ('domain', 'ns', 'ttl'),
         [('v13.gr', 'ns1.dns.example.com', datetime.timedelta(hours=1)),
          ('v13.gr', 'ns2.dns.example.com', datetime.timedelta(hours=1)),
-         ('sub.v13.gr', 'ns1.example.com', 300),
-         ('sub.v13.gr', 'ns2.example.com', 300),
+         ('sub.v13.gr', 'ns1.sub.v13.gr', 300),  # cname glue
+         ('sub.v13.gr', 'ns2.sub.v13.gr', 300),  # non-cname glue
+         ('sub.v13.gr', 'ns3.example.com', 300),  # non-glue
          ('dyn.v13.gr', 'ns1.example.com', 300),
          ('dyn.v13.gr', 'ns2.example.com', 300),
          ('10.in-addr.arpa', 'ns1.dns.example.com', datetime.timedelta(days=1)),
