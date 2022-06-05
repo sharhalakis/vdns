@@ -214,7 +214,7 @@ class CNAME(RR):
 
     @property
     def sort_key(self) -> Any:
-        if self.hostname.endswith('_domainkey'):
+        if self.hostname and self.hostname.endswith('_domainkey'):
             return f'zzzz_{self.hostname}'
         return self.hostname
 
