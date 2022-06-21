@@ -35,10 +35,8 @@ class DB(vdns.db.DB):
     _tables: dict[str, DBReadResults]
     _serials: dict[str, int]
 
-    def __init__(self, dbname: str, dbuser: Optional[str] = None, dbpass: Optional[str] = None,
-                 dbhost: Optional[str] = None, dbport: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         # pylint: disable=super-init-not-called
-        assert isinstance(dbname, str)
         self.db = unittest.mock.create_autospec(psycopg2.extensions.connection)
 
         self._tables = {
@@ -281,11 +279,14 @@ def add_test_data() -> None:
         # ('domain', 'hostname', 'keytype', 'hashtype', 'fingerprint', 'ttl'),
         [('v13.gr', 'host3', 1, 1, '1234567890abcdef1234567890abcdef12345678', None),
          ('v13.gr', 'host3', 2, 1, '01234567890abcdef1234567890abcdef1234567', None),
+         ('v13.gr', 'host100', 1, 1, '234567890abcdef1234567890abcdef123456789', None),  # Non-existent host
          ])
     db.set_data_tuples(
         'txt',
         # ('domain', 'hostname', 'txt', 'ttl'),
         [('v13.gr', '', 'v=spf1 include:_spf.google.com ~all', None),
+         ('v13.gr', 'host3', 'v=spf1 include:_spf.google.com ~all', None),
+         ('v13.gr', 'host100', 'v=spf1 include:_spf.google.com ~all', None),
          ])
     db.set_data_tuples(
         'ns',

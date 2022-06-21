@@ -28,13 +28,13 @@ import collections
 import vdns.common
 import vdns.util.config
 import vdns.util.export
+import vdns.util.import_key
 
 from typing import Optional
 
-od = collections.OrderedDict
-
-modules = od([
-    ('export', vdns.util.export)
+modules = collections.OrderedDict([
+    ('export', vdns.util.export),
+    ('import-key', vdns.util.import_key),
 ])
 
 
@@ -75,8 +75,7 @@ def init_args() -> None:
         # Add the arguments for each module
         for k, v in modules.items():
             subparser = sub.add_parser(k)
-            func = getattr(v, 'add_args')
-            func(subparser)
+            v.add_args(subparser)
 
         # In this mode, this gets set later
         module = None
@@ -84,7 +83,7 @@ def init_args() -> None:
         vdns.util.export.args.add_args(parser)
         module = modules[config.util]
     else:
-        abort(f'Bad utility name: f{config.util}')
+        abort(f'Bad utility name: {config.util}')
 
     # Parse them
     args = parser.parse_args()
@@ -95,16 +94,14 @@ def init_args() -> None:
 
     if config.util:
         config.what = config.util
-    else:
+    elif args.what:
         config.what = args.what
-
-    if config.what is None:
+    else:
         parser.error('Must specify a utility')
 
     if module is None:
-        if config.what == 'export':
-            module = vdns.util.export
-        else:
+        module = modules.get(config.what)
+        if module is None:
             abort(f'Bad action: f{config.what}')
 
     assert module is not None
@@ -144,7 +141,7 @@ def init() -> None:
 def doit() -> int:
     config = vdns.util.config.get_config()
 
-    logging.debug('Doing main')
+    logging.debug('Running module')
     ret = config.module.doit()
 
     return ret
@@ -165,7 +162,8 @@ def runutil(util: Optional[str]) -> None:
     try:
         ret = doit()
     except vdns.common.AbortError as r:
-        logging.error('Execution failed: %s', r)
+        if not r.error_shown:
+            logging.error('Execution failed: %s', r)
         ret = r.excode
 
     sys.exit(ret)

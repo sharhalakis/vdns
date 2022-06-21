@@ -19,7 +19,7 @@ class DynamicTest(unittest.TestCase):
 
     def setUp(self) -> None:
         vdns.db_testlib.init()
-        db = vdns.db_testlib.init_db(dbname='test')
+        db = vdns.db_testlib.init_db()
         patchers = dynamic_testlib.init()
         for p in patchers.values():
             self.addCleanup(p.stop)

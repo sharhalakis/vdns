@@ -1,6 +1,7 @@
 import unittest
 import parameterized
 
+import vdns.common
 from vdns import zoneparser
 
 from typing import Optional
@@ -34,6 +35,35 @@ class FuncTest(unittest.TestCase):
         self.assertEqual(zoneparser.cleanup_line(line), res)
 
     @parameterized.parameterized.expand([
+        ('abc', False, False),
+        ('abc', True, True),
+        ('(abc', False, True),
+        ('abc)', True, False),
+        ('(abc)', False, False),
+
+        # Multiple parentheses
+        ('(abc) (cde) (efg)', False, False),
+        ('(abc) (cde) (efg', False, True),
+        ('abc) (cde) (efg', True, True),
+
+        # Quotes
+        ('abc) "(cde) (efg"', True, False),
+        ('abc "(")', True, False),
+
+        # Invalid
+        ('(abc)', True, None),
+        ('abc)', False, None),
+        ('abc"(', False, None),
+    ])
+    def test_line_ends_in_parentheses(self, line: str, in_perentheses: bool, expected: Optional[bool]) -> None:
+        if expected is None:
+            with self.assertRaises(vdns.common.AbortError):
+                zoneparser.line_ends_in_parentheses(line, in_perentheses)
+        else:
+            res = zoneparser.line_ends_in_parentheses(line, in_perentheses)
+            self.assertEqual(res, expected)
+
+    @parameterized.parameterized.expand([
         ('', None, None, None, None),
         ('host1 IN A 10.1.1.1', 'host1', None, 'A', '10.1.1.1'),
         ('      IN MX mx', None, None, 'MX', 'mx'),
@@ -60,6 +90,61 @@ class FuncTest(unittest.TestCase):
     ])
     def test_parse_ttl(self, st: str, seconds: int) -> None:
         self.assertEqual(zoneparser.parse_ttl(st), seconds)
+
+    @parameterized.parameterized.expand([
+        ('''\
+@               1D      IN      SOA     ns1.example.com. v13.v13.gr. (
+                                2021010302      ; serial
+                                1D              ; refresh (1 day)
+                                1H              ; retry (1 hour)
+                                90D             ; expire (12 weeks, 6 days)
+                                1M              ; minimum (1 minute)
+                                )''',
+         '@ 1D IN SOA ns1.example.com. v13.v13.gr. 2021010302 1D 1H 90D 1M'),
+
+        ('@ 1D IN SOA ns1.example.com. v13.v13.gr. (2021010302 1D 1H 90D 1M)',
+         '@ 1D IN SOA ns1.example.com. v13.v13.gr. 2021010302 1D 1H 90D 1M'),
+
+        ('@ 1D IN SOA ns1.example.com. v13.v13.gr. ((2021010302 1D 1H 90D 1M)', None),
+        ('@ 1D IN SOA ns1.example.com. v13.v13.gr. (2021010302 1D 1H 90D 1M))', None),
+
+        ('@ 1D IN SOA ns1.example.com. v13.v13.gr. (2021010302 1D 1H 90D) (1M)',
+         '@ 1D IN SOA ns1.example.com. v13.v13.gr. 2021010302 1D 1H 90D 1M'),
+
+        ('''@   IN  TXT  ("abcd" "bcde"
+                          "cdef"
+                          "ghi")''',
+         '@ IN TXT "abcd" "bcde" "cdef" "ghi"'),
+
+        ('''@   IN  TXT  ("abcd" "bcde"
+                          "cdef"
+                          "ghi")''',
+         '@ IN TXT "abcdbcdecdefghi"', True),
+
+        ('''@   IN  TXT  ("abcd " "bcde"
+                          "cdef  "
+                          "ghi ")''',
+         '@ IN TXT "abcd bcdecdef  ghi "', True),
+
+        ('''@   IN  TXT  ("abcd
+                           cdef"''',
+         None),
+
+        # pylint: disable=line-too-long
+        ('''IN      DNSKEY  256 3 8 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                                    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                                    cccccc''',
+         'IN DNSKEY 256 3 8 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccc'),
+        # pylint: enable=line-too-long
+    ])
+    def test_merge_multiline(self, st: str, exp: Optional[str], merge_quotes: bool = False) -> None:
+        lines = st.splitlines()
+        if exp is None:
+            with self.assertRaises(vdns.common.AbortError):
+                zoneparser.merge_multiline(lines, merge_quotes)
+        else:
+            res = zoneparser.merge_multiline(lines, merge_quotes)
+            self.assertEqual(res, exp)
 
 
 class ZoneParserTest(unittest.TestCase):

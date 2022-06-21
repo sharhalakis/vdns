@@ -17,7 +17,7 @@ class TestZoneMaker(unittest.TestCase):
 
     def setUp(self) -> None:
         vdns.db_testlib.init()
-        vdns.db_testlib.init_db(dbname='test')
+        vdns.db_testlib.init_db()
         vdns.src.dynamic_testlib.init()
         vdns.db_testlib.add_test_data()
 
@@ -128,12 +128,19 @@ class TestZoneMaker(unittest.TestCase):
             'sub 5M IN NS ns3.example.com.',
 
             'host1 IN A 10.1.1.1',
-            ('www IN CNAME host1', True),
+            'www IN CNAME host1',
 
             'host3 15M IN A 10.1.1.3',
-            ('IN AAAA 2001:db8:2c1:12::1', True),
+            'IN AAAA 2001:db8:2c1:12::1',
+            'IN TXT "v=spf1 include:_spf.google.com ~all"',
+            'IN SSHFP 1 1 1234567890abcdef1234567890abcdef12345678',
+            'IN SSHFP 2 1 01234567890abcdef1234567890abcdef1234567',
 
             'ldap 30D IN CNAME host2.v13.gr.',
+
+            # entries not associated with any host
+            'host100 IN TXT "v=spf1 include:_spf.google.com ~all"',
+            'host100 IN SSHFP 1 1 234567890abcdef1234567890abcdef123456789',
         ]
 
         self._check_lines(lines, needed_lines)

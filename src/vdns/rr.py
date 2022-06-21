@@ -3,6 +3,7 @@ import datetime
 import dataclasses as dc
 import ipaddress
 
+import vdns.db
 import vdns.common
 
 from typing import Any, Dict, Optional, Sequence, Type, TypeVar, Union
@@ -16,6 +17,8 @@ class BadRecordError(Exception):
 class _StringRecord:
     """Holds the resulting RR string, plus a few related information. Used as a return type for make_string()."""
     st: str
+    multiline_st: Sequence[str]
+    comment: str
     # Override the hostname
     hostname: Optional[str]
     # Override the rrname
@@ -23,9 +26,11 @@ class _StringRecord:
     autodot: int
     _needsdot: Optional[bool]
 
-    def __init__(self, st: str, /, hostname: Optional[str] = None, rrname: Optional[str] = None,
-                 needsdot: Optional[bool] = None, autodot: int = 0):
+    def __init__(self, st: str, *, multiline_st: Sequence[str] = (), comment: str = '', hostname: Optional[str] = None,
+                 rrname: Optional[str] = None, needsdot: Optional[bool] = None, autodot: int = 0):
         self.st = st
+        self.multiline_st = multiline_st
+        self.comment = comment
         self.hostname = hostname
         self.rrname = rrname
         self._needsdot = needsdot
@@ -46,6 +51,14 @@ class _StringRecord:
 
 @dc.dataclass(kw_only=True)
 class RR:
+    """
+    There are three hostnames:
+    - hostname: The actual hostname record
+    - associated_hostname: A hostname that this record is associated with.
+                           For example for DKIM records (selector._domainkey.hostname)
+    - coocked_hostname: The hostname that will be added to the records.
+                        For example for SRV records (_xmpp-client._tcp)
+    """
     domain: str
     hostname: Optional[str] = None
     ttl: Optional[datetime.timedelta] = None
@@ -72,14 +85,17 @@ class RR:
         assert all(isinstance(x, _StringRecord) for x in records)
 
         for rec in records:
-            if not rec.st:
+            if not rec.st and not rec.multiline_st:
                 raise BadRecordError('Record is missing the data', self)
+
+            if rec.multiline_st and rec.needsdot:
+                raise BadRecordError('Cannot use needsdot with multiline strings', self)
 
             if rec.needsdot and rec.st[-1] != '.':
                 rec.st += '.'
 
             if rec.hostname is None:
-                hostname = self.hostname
+                hostname = self.cooked_hostname
             else:
                 hostname = rec.hostname
 
@@ -88,7 +104,7 @@ class RR:
 
             rrname = rec.rrname if rec.rrname else self.rrname
 
-            ret += vdns.common.fmtrecord(hostname, self.ttl, rrname, rec.st)
+            ret += vdns.common.fmtrecord(hostname, self.ttl, rrname, rec.st, rec.multiline_st, rec.comment)
             ret += '\n'
 
         return ret
@@ -106,17 +122,48 @@ class RR:
 
     @property
     def sort_key(self) -> Any:
-        return self.hostname
+        return self.cooked_hostname
 
     def __lt__(self, other: 'RR') -> bool:
-        if self.hostname is None:
+        if self.sort_key is None:
             return True
-        if other.hostname is None:
+        if other.sort_key is None:
             return False
-        return self.hostname < other.hostname
+        return self.sort_key < other.sort_key
+
+    def __gt__(self, other: 'RR') -> bool:
+        if self.sort_key is None:
+            return False
+        if other.sort_key is None:
+            return True
+        return self.sort_key > other.sort_key
+
+    @property
+    def associated_hostname(self) -> Optional[str]:
+        """Returns the hostname that this record should be associated with.
+        For cases like CNAMEs where they are associated with the target hostname and should be listed close to that.
+        """
+        # self.hostname and not self.cooked_hostname
+        return self.hostname
+
+    @property
+    def cooked_hostname(self) -> Optional[str]:
+        """The hostname to be added to the zone file. In cases like DKIM, the listed hostname has extra parts."""
+        return self.hostname
+
+    @property
+    def dbfields(self) -> tuple[str, ...]:
+        """Returns the names of the database fields for this RR."""
+        return 'domain', 'hostname', 'ttl'
+
+    def dbvalues(self) -> vdns.db.QueryArgs:
+        """Returns a dict suitable for an insert to the database."""
+        dt = dc.asdict(self)
+        ret: vdns.db.QueryArgs = {x: dt[x] for x in self.dbfields}
+        return ret
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class MX(RR):
     priority: int
     mx: str
@@ -128,7 +175,7 @@ class MX(RR):
         return ret
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class NS(RR):
     ns: str
 
@@ -139,7 +186,7 @@ class NS(RR):
         return ret
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class Host(RR):
     ip: vdns.common.IPAddress
     reverse: Optional[bool]
@@ -166,13 +213,21 @@ class Host(RR):
         return self.as_ipv6
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class PTR(Host):
     net_domain: str
 
     @property
     def rrname(self) -> str:
         return self._rrname()
+
+    @property
+    def cooked_hostname(self) -> Optional[str]:
+        rev = self.ip.reverse_pointer
+        # sanity check
+        assert rev.endswith(f'.{self.net_domain}'), f"'{rev}' doesn't end with '{self.net_domain}'"
+        hostname = rev.removesuffix(f'.{self.net_domain}')
+        return hostname
 
     def _records(self) -> _StringRecord:
         if self.hostname:
@@ -185,27 +240,18 @@ class PTR(Host):
         if self.ip.version not in (4, 6):
             raise BadRecordError('Bad IP version', self)
 
-        rev = self.ip.reverse_pointer
-
-        # sanity check
-        assert rev.endswith(f'.{self.net_domain}'), f"'{rev}' doesn't end with '{self.net_domain}'"
-        hostname = rev.removesuffix(f'.{self.net_domain}')
-
-        return _StringRecord(data, hostname=hostname, needsdot=True)
+        return _StringRecord(data, needsdot=True)
 
     @classmethod
     def from_host(cls, host: Host, net_domain: str) -> 'PTR':
         return cls(net_domain=net_domain, **dc.asdict(host))
 
-    def __lt__(self, other: 'RR') -> bool:
-        assert isinstance(other, PTR)
-        # IPv4 before IPv6, then normal order based on the packed version
-        s1 = b'%d-%b' % (self.ip.version, self.ip.packed)
-        s2 = b'%d-%b' % (other.ip.version, other.ip.packed)
-        return s1 < s2
+    @property
+    def sort_key(self) -> Any:
+        return b'%d-%b' % (self.ip.version, self.ip.packed)
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class CNAME(RR):
     hostname0: str
 
@@ -218,8 +264,12 @@ class CNAME(RR):
             return f'zzzz_{self.hostname}'
         return self.hostname
 
+    @property
+    def associated_hostname(self) -> Optional[str]:
+        return self.hostname0
 
-@dc.dataclass
+
+@dc.dataclass(kw_only=True)
 class TXT(RR):
     txt: str
 
@@ -227,8 +277,23 @@ class TXT(RR):
         data = f'"{self.txt}"'
         return _StringRecord(data)
 
+    # TODO: Use this and introduce a associated_hostname() property, which should be used for
+    # looking up the hostname to associate entries with. This way the _spf records for hosts will be
+    # associated with the hosts themselves
+    @property
+    def sort_key(self) -> Any:
+        if self.hostname and self.hostname.startswith('_spf.'):
+            return self.hostname.removeprefix('_spf.') + '_zzzz'
+        return self.hostname
 
-@dc.dataclass
+    @property
+    def associated_hostname(self) -> Optional[str]:
+        if self.hostname and self.hostname.startswith('_spf.'):
+            return self.hostname.removeprefix('_spf.')
+        return self.hostname
+
+
+@dc.dataclass(kw_only=True)
 class DNSSEC(RR):
     keyid: int
     ksk: bool
@@ -242,21 +307,42 @@ class DNSSEC(RR):
     ts_activate: datetime.datetime
     ts_publish: datetime.datetime
 
+    # https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml
+    class Algos(enum.Enum):
+        RSASHA1 = 5
+        NSEC3RSASHA1 = 7
+        RSASHA256 = 8
+        RSASHA512 = 9
+        ECDSAP256SHA256 = 13
+        ECDSAP384SHA384 = 14
+        ED25519 = 15
+        ED448 = 16
+
     def _records(self) -> Union[_StringRecord, list[_StringRecord]]:
         raise NotImplementedError
 
+    @property
+    def dbfields(self) -> tuple[str, ...]:
+        return ('domain', 'ttl', 'keyid', 'ksk', 'algorithm', 'digest_sha1', 'digest_sha256', 'key_pub',
+                'st_key_pub', 'st_key_priv', 'ts_created', 'ts_activate', 'ts_publish')
 
-@dc.dataclass
+
+@dc.dataclass(kw_only=True)
 class DNSKEY(DNSSEC):
     def _records(self) -> _StringRecord:
         if self.ksk:
             flags = 257
+            key_st = 'KSK'
         else:
             flags = 256
+            key_st = 'ZSK'
 
-        data = f'{flags} 3 {self.algorithm} {self.key_pub}'
+        data = f'{flags} 3 {self.algorithm}'
+        multiline_data = self.key_pub.split()
+        algo = self.Algos(self.algorithm)
+        comment = f'{key_st} ; alg = {algo.name} ; key id = {self.keyid}'
 
-        return _StringRecord(data)
+        return _StringRecord(data, multiline_st=multiline_data, comment=comment)
 
     @classmethod
     def from_dnssec(cls, dnssec: DNSSEC) -> 'DNSKEY':
@@ -264,7 +350,7 @@ class DNSKEY(DNSSEC):
         return DNSKEY(**dc.asdict(dnssec))
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class DS(DNSSEC):
     def _records(self) -> list[_StringRecord]:
         ret = []
@@ -278,7 +364,7 @@ class DS(DNSSEC):
         return DS(**dc.asdict(dnssec))
 
 
-@dc.dataclass
+@dc.dataclass(kw_only=True)
 class SSHFP(RR):
     keytype: int
     hashtype: int
@@ -299,10 +385,14 @@ class DKIM(RR):
     h: Optional[str] = None
     subdomains: bool
 
-    def _records(self) -> _StringRecord:
+    @property
+    def cooked_hostname(self) -> Optional[str]:
         hostname = f'{self.selector}._domainkey'
         if self.hostname:
             hostname += f'.{self.hostname}'
+        return hostname
+
+    def _records(self) -> _StringRecord:
         data0 = []
         data0.append('v=DKIM1')
         if self.g is not None:
@@ -321,9 +411,9 @@ class DKIM(RR):
         if self.h is not None:
             data0.append(f'h={self.h}')
         data0.append(f'p={self.key_pub}')
+        lines = vdns.common.split_txt_multiline('; '.join(data0))
 
-        data = vdns.common.split_txt('; '.join(data0))
-        return _StringRecord(data, hostname=hostname, rrname='TXT')
+        return _StringRecord(st='', multiline_st=lines, rrname='TXT')
 
 
 @dc.dataclass(kw_only=True)
@@ -342,13 +432,17 @@ class SRV(RR):
     port: int
     target: str
 
-    def _records(self) -> _StringRecord:
+    @property
+    def cooked_hostname(self) -> Optional[str]:
         hostname = f'_{self.service}._{self.protocol}'
         if self.name:
             hostname += f'.{self.name}'
+        return hostname
+
+    def _records(self) -> _StringRecord:
         data = f'{self.priority} {self.weight} {self.port} {self.target}'
         needsdot = self.target.count('.') >= 1
-        return _StringRecord(data, hostname=hostname, needsdot=needsdot)
+        return _StringRecord(data, needsdot=needsdot)
 
 
 @dc.dataclass
@@ -362,9 +456,6 @@ class SOA:
     contact: str = ''
     serial: int = 1
     ns0: str = ''
-#    ts: datetime.datetime
-#    reverse: bool
-#    updated: Optional[datetime.datetime] = None
 
     def record(self) -> str:
         ttl = vdns.common.zone_fmttd(self.ttl)
@@ -396,6 +487,9 @@ $TTL\t\t\t{ttl2}; {ttl.human_readable}
 
     def __lt__(self, other: 'SOA') -> bool:
         return self.name < other.name
+
+    def __gt__(self, other: 'SOA') -> bool:
+        return self.name > other.name
 
 
 T_RR_SOA = TypeVar('T_RR_SOA', bound=Union[RR, SOA])

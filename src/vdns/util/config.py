@@ -11,12 +11,12 @@
 
 __all__ = ['get_config', 'set_module_config']
 
+import collections
 import dataclasses as dc
 
 from typing import Any, Optional
 
 
-# Global config options
 @dc.dataclass
 class Config:
     util: Optional[str] = None  # The pre-set utility
@@ -74,22 +74,27 @@ class MergedConfig:
 
 
 _config: Config = Config()
-_module_config: Optional[object] = None
+_module_configs: collections.OrderedDict[str, object] = collections.OrderedDict()
 _merged_config: MergedConfig = MergedConfig(_config)
 
 
-def set_module_config(cfg: object) -> None:
+def set_module_config(module: str, cfg: object) -> None:
     """! Point to the module config
 
     @param cfg      The config object
     """
-    global _module_config
     global _merged_config
 
-    _module_config = cfg
+    # Ignore duplicate attempts. DB for example is used by more than one modules, so it's expected
+    # to be attempted to be added twice.
+    if module in _module_configs:
+        return
+
+    # _module_config = cfg
+    _module_configs[module] = cfg
 
     # Re-set this
-    _merged_config = MergedConfig(_config, _module_config)
+    _merged_config = MergedConfig(_config, *_module_configs.values())
 
 
 def get_config() -> MergedConfig:

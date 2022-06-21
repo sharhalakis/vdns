@@ -1,14 +1,12 @@
-import sys
-import struct
-import base64
-import hashlib
 import logging
 import dataclasses as dc
 
 from pprint import pprint
-from typing import Optional, Sequence, Union
+from typing import Iterable, Optional
 
 __all__ = ['ZoneParser']
+
+import vdns.common
 
 db = None
 
@@ -44,6 +42,92 @@ def cleanup_line(line0: str) -> str:
     return line
 
 
+def line_ends_in_parentheses(line: str, in_parentheses: bool) -> bool:
+    """Checks whether a line ends with open parentheses or not.
+
+    Args:
+        line: The line to parse. The line must be already clean from comments.
+        in_parentheses: if True then indicate that it's already in parentheses, for sanity checks.
+
+    Returns:
+        True if the line ends while a parentheses is open
+    """
+    in_quotes = False
+
+    for x in line:
+        if in_quotes and x != '"':
+            continue
+        if x == '"':
+            in_quotes = not in_quotes
+            continue
+        if in_parentheses:
+            if x == ')':
+                in_parentheses = False
+            elif x == '(':
+                vdns.common.abort(f'Found "(" while already in parentheses: {line}')
+        else:  # not in_parentheses
+            if x == '(':
+                in_parentheses = True
+            elif x == ')':
+                vdns.common.abort(f'Found ")" without being in parentheses: {line}')
+
+    if in_quotes:
+        vdns.common.abort(f'Line ended up with open quotes: {line}')
+
+    return in_parentheses
+
+
+def merge_multiline(lines0: Iterable[str], merge_quotes: bool) -> str:
+    """Merges multiple lines to a single line, taking care of parentheses and quotes."""
+    ret = ''
+    in_quotes = False
+    in_parentheses = False
+
+    # Merge the lines, removing any comments
+    lines: list[str] = []
+    for line0 in lines0:
+        lines.append(vdns.common.compact_spaces(cleanup_line(line0)))
+
+    # Maintain '\n' for sanity checking quotes. It'll be replaced by space.
+    line = '\n'.join(lines)
+
+    for x in line:
+        # Quotes must not span multiple lines
+        if x == '\n':
+            if in_quotes:
+                vdns.common.abort(f'Line ended up with open quotes: {line}')
+            ret += ' '
+            continue
+
+        if in_quotes and x != '"':
+            ret += x
+            continue
+        if x == '"':
+            ret += x
+            in_quotes = not in_quotes
+            continue
+
+        if x == '(':
+            if in_parentheses:
+                vdns.common.abort(f'Found "(" within "(": {line}')
+            in_parentheses = True
+        elif x == ')':
+            if not in_parentheses:
+                vdns.common.abort(f'Found ")" wouthout "(": {line}')
+            in_parentheses = False
+        elif x in ('\n', '\r'):
+            ret += ' '
+        else:
+            ret += x
+
+    if merge_quotes:
+        ret = vdns.common.merge_quotes(ret)
+    else:
+        ret = vdns.common.compact_spaces(ret)
+
+    return ret
+
+
 @dc.dataclass
 class ParsedLine:
     addr1: Optional[str] = None
@@ -76,15 +160,18 @@ def parse_ttl(st: str) -> int:
         ret = st
     elif st[-1].isdigit():
         ret = int(st)
-    else:
+    elif st[-1].upper() in deltas:
         ret = int(st[:-1])
         w = st[-1].upper()
         ret *= deltas[w]
+    else:
+        vdns.common.abort(f'Cannot parse ttl "{st}"')
 
     return ret
 
 
 def parse_line(line0: str) -> Optional[ParsedLine]:
+    """Parses a line. Line can actually be multiple lines."""
     line = cleanup_line(line0)
 
     if len(line) == 0 or line[0] == ';':
@@ -112,7 +199,8 @@ def parse_line(line0: str) -> Optional[ParsedLine]:
     ret.rr = items[rridx]
 
     # Preserve addr2's spaces. Re-split addr2idx times and get the remainder
-    ret.addr2 = line.split(maxsplit=addr2idx)[-1]
+    addr2 = line.split(maxsplit=addr2idx)[-1]
+    ret.addr2 = addr2
 
     for i in range(rridx):
         if items[i] == 'IN':
@@ -127,191 +215,6 @@ def parse_line(line0: str) -> Optional[ParsedLine]:
             return None
 
     return ret
-
-
-def sinn(val: Optional[str], char: str) -> Optional[str]:
-    # Strip if not None
-    if val is None:
-        ret = None
-    else:
-        ret = val.strip(char)
-
-    return ret
-
-
-def ein(val: Optional[str]) -> str:
-    # Return empty if it's null
-    if val is None:
-        return ''
-    return val
-
-
-def esinn(val: Optional[str], char: str) -> str:
-    return ein(sinn(val, char))
-
-
-def error(st: str) -> None:
-    logging.error(st)
-    sys.exit(1)
-
-
-def insert(tbl: str, fields: Sequence[str], values: Sequence[Optional[Union[str, int]]]) -> str:
-    values2 = []
-    for v in values:
-        if v is None:
-            values2.append('NULL')
-        elif isinstance(v, str) and len(v) > 0 and v[0] == '\x00':
-            values2.append(v[1:])
-        else:
-            values2.append(f"'{v}'")
-
-    st_fields = ', '.join(fields)
-    st_values2 = ', '.join(values2)
-    st = f'INSERT INTO {tbl}({st_fields}) VALUES({st_values2});'
-    # st = 'INSERT INTO %s(%s) VALUES(%s);' % (tbl, ', '.join(fields), ', '.join(values2))
-
-    return st
-
-
-def ins_soa(name: str, reverse: str, ttl: int, refresh: str, retry: str, expire: str, minimum: str,
-            contact: str, serial: str, ns0: str) -> str:
-    name2 = esinn(name, '.')
-    contact2 = esinn(contact, '.')
-    ns02 = ns0.strip('.')
-
-    ret = insert('domains',
-                 ('name', 'reverse', 'ttl', 'refresh', 'retry', 'expire', 'minimum',
-                  'contact', 'serial', 'ns0'),
-                 (name2, reverse, ttl, refresh, retry, expire, minimum, contact2,
-                  serial, ns02))
-
-    return ret
-
-
-def ins_a(domain: str, host: str, ip: str, ttl: int) -> str:
-    host2 = esinn(host, '.')
-    domain2 = domain.strip('.')
-
-    ret = insert('hosts', ('ip', 'domain', 'hostname', 'ttl'),
-                 (ip, domain2, host2, ttl))
-
-    return ret
-
-
-def ins_cname(domain: str, host: str, host0: str, ttl: int) -> str:
-    host2 = esinn(host, '.')
-    host02 = host0.strip('.')
-    domain2 = domain.strip('.')
-
-    ret = insert('cnames', ('domain', 'hostname', 'hostname0', 'ttl'),
-                 (domain2, host2, host02, ttl))
-
-    return ret
-
-
-def ins_txt(domain: str, host: str, txt: str, ttl: int) -> str:
-    host2 = esinn(host, '.')
-    domain2 = domain.strip('.')
-    txt2 = txt.strip('"')
-
-    ret = insert('txt', ('domain', 'hostname', 'txt', 'ttl'),
-                 (domain2, host2, txt2, ttl))
-
-    return ret
-
-
-def ins_ns(domain: str, ns: str, ttl: int) -> str:
-    domain2 = domain.strip('.')
-    ns2 = ns.strip('.')
-
-    ret = insert('ns', ('domain', 'ns', 'ttl'),
-                 (domain2, ns2, ttl))
-
-    return ret
-
-
-def ins_mx(domain: str, hostname: str, priority: str, mx: str, ttl: int) -> str:
-    domain2 = domain.strip('.')
-    hostname2 = esinn(hostname, '.')
-    mx2 = mx.strip('.')
-
-    ret = insert('mx', ('domain', 'hostname', 'priority', 'mx', 'ttl'),
-                 (domain2, hostname2, priority, mx2, ttl))
-
-    return ret
-
-
-def calc_dnssec_keyid(flags: str, protocol: str, algorithm: str, st: str) -> int:
-    """
-    Calculate the keyid based on the key string
-    """
-
-    st2: bytes
-
-    st0 = st.replace(' ', '')
-    st2 = struct.pack('!HBB', int(flags), int(protocol), int(algorithm))
-    st2 += base64.b64decode(st0)
-
-    cnt = 0
-    for idx, ch in enumerate(st2):
-        # TODO: verify this. Looks like we don't need the struct.unpack in python3
-        # s = struct.unpack('B', ch)[0]
-        s = ch
-        if (idx % 2) == 0:
-            cnt += s << 8
-        else:
-            cnt += s
-
-    ret = ((cnt & 0xFFFF) + (cnt >> 16)) & 0xFFFF
-
-    return ret
-
-
-def calc_ds_sigs(owner: str, flags: str, protocol: str, algorithm: str, st: str) -> dict[str, str]:
-    """
-    Calculate the DS signatures
-
-    Return a dictionary where key is the algorithm and value is the value
-    """
-
-    st2: bytes
-
-    st0 = st.replace(' ', '')
-    st2 = struct.pack('!HBB', int(flags), int(protocol), int(algorithm))
-    st2 += base64.b64decode(st0)
-
-    # Transform owner from A.B.C to <legth of A>A<length of B>B<length of C>C0
-
-    if owner[-1] == '.':
-        owner2 = owner
-    else:
-        owner2 = owner + '.'
-
-    owner3 = b''
-    for i in owner2.split('.'):
-        owner3 += struct.pack('B', len(i)) + i.encode('ASCII')
-
-    st3: bytes = owner3 + st2
-
-    ret = {
-        'sha1': hashlib.sha1(st3).hexdigest().upper(),
-        'sha256': hashlib.sha256(st3).hexdigest().upper(),
-    }
-
-    return ret
-
-
-# def ins_dnssec_no(domain, hostname, flags, protocol, algorithm, key_pub):
-#     domain2 = domain.strip('.')
-#     hostname2 = esinn(hostname, '.')
-#
-#     keyid = calc_dnssec_keyid(flags, protocol, algorithm, key_pub)
-#
-#     print('keyid', keyid)
-#
-#     insert('dnssec',
-#            ('domain', 'hostname', 'keyid', 'algorithm', 'key_pub'),
-#            (domain2, hostname2, keyid, algorithm, key_pub))
 
 
 # def handle_entry(domain: str, r: Sequence[str]) -> None:
@@ -444,9 +347,9 @@ class ZoneParser:
 
         lastname: Optional[str] = None
         domain: str = ''
-        insoa = False
+        in_parentheses = False
 
-        soastr = ''
+        buffer: list[str] = []  # For parentheses
 
         if zone is not None:
             domain = zone.strip('.')
@@ -474,82 +377,16 @@ class ZoneParser:
                 self.dt.defttl = defttl
                 continue
 
-            # If we are in SOA then concatenate the lines until we find a )
-            # Then parse the resulting line
-            #
-            # Don't attempt to parse intermediate SOA lines. Remember that
-            # the first line is already parsed.
-            #
-            # This logic fails if the whole SOA is on one line and there is
-            # no empty/comment line after that.
-            if insoa:
-                soastr += ' '
-                soastr += line
-
-                # The end
-                if ')' in soastr:
-                    insoa = False
-
-                    r = parse_line(soastr)
-                    if r is None:
-                        raise Exception(f'Failed to parsed SOA: {soastr}')
-                    # msg(repr(r))
-
-                    ttl: Optional[int]
-
-                    if r.ttl is None:
-                        ttl = None
-                    else:
-                        ttl = parse_ttl(r.ttl)
-
-                    # Sample r.addr2
-                    #  hell.gr. root.hell.gr. ( 2012062203 24H 1H 1W 1H )
-                    # After removal of ( and ):
-                    #  hell.gr. root.hell.gr. 2012062203 24H 1H 1W 1H
-                    # Fields:
-                    #  0: ns0
-                    #  1: contact
-                    #  2: serial
-                    #  3: refresh
-                    #  4: retry
-                    #  5: expire
-                    #  6: minimum
-
-                    t = r.addr2.replace('(', '').replace(')', '').split()
-
-                    #                    if domain.strip('.')!=t[0].strip('.'):
-                    #                        error('Domain doesn't match! (%s - %s)' % \
-                    #                            (domain, t[0]))
-
-                    if ttl is None:
-                        ttl = defttl
-
-                    soattl = ttl
-
-                    # Domain name was not passed as a parameter and wasn't determined from SOA
-                    if not domain:
-                        raise Exception('Failed to determine domain')
-
-                    self.dt.domain = domain
-                    self.dt.soa = Data.SOA(
-                        name=domain,
-                        contact=t[1],
-                        serial=int(t[2]),
-                        ttl=ttl,
-                        refresh=parse_ttl(t[3]),
-                        retry=parse_ttl(t[4]),
-                        expire=parse_ttl(t[5]),
-                        minimum=parse_ttl(t[6]),
-                        ns0=t[0],
-                        reverse=False,
-                    )
-                #                    ins_soa(name=domain, contact=t[1], serial=t[2], ttl=ttl,
-                #                        refresh=t[3], retry=t[4], expire=t[5], minimum=t[6],
-                #                        ns0=t[0], reverse=False)
-
+            # Buffer lines while we're in parentheses
+            buffer.append(line)
+            in_parentheses = line_ends_in_parentheses(line, in_parentheses)
+            if in_parentheses:
                 continue
 
-            r = parse_line(line)
+            line2 = merge_multiline(buffer, merge_quotes=True)
+            buffer = []
+
+            r = parse_line(line2)
 
             if r is None:
                 continue
@@ -557,39 +394,59 @@ class ZoneParser:
             if r.rr == 'SOA':
                 if domain:
                     if r.addr1 not in ('@', domain):
-                        error(f"Domain doesn't match! ({domain} - {r.addr1})")
+                        vdns.common.abort(f"Domain doesn't match! ({domain} - {r.addr1})")
                 else:
                     if not r.addr1:
                         # No domain from SOA and not provided as a parameter
-                        error('Could not find domain from SOA')
+                        vdns.common.abort('Could not find domain from SOA')
                     else:
                         domain = r.addr1
 
-                # domain=r[4].split()[0]
-
-                # if r.addr1 != '@' and domain:
-                #     if r.addr1 != domain:
-                #         error(f"Domain doesn't match! ({domain} - {r.addr1})")
-                #
-                # if not domain:
-                #     if not r.addr1:
-                #         # No domain from SOA and not provided as a parameter
-                #         error('Could not find domain from SOA')
-                #     else:
-                #         domain = r.addr1
-
-                # domain = zone
-                lastname = None
+                # Domain name was not passed as a parameter and wasn't determined from SOA
+                if not domain:
+                    vdns.common.abort('Failed to determine domain')
 
                 logging.debug('Domain: %s', domain)
 
-                insoa = True
-                soastr = line
+                lastname = None
+
+                if r.ttl is None:
+                    soattl = defttl
+                else:
+                    soattl = parse_ttl(r.ttl)
+
+                # Sample r.addr2
+                #  hell.gr. root.hell.gr. ( 2012062203 24H 1H 1W 1H )
+                # After removal of ( and ):
+                #  hell.gr. root.hell.gr. 2012062203 24H 1H 1W 1H
+                # Fields:
+                #  0: ns0
+                #  1: contact
+                #  2: serial
+                #  3: refresh
+                #  4: retry
+                #  5: expire
+                #  6: minimum
+
+                t = r.addr2.split()
+
+                self.dt.domain = domain
+                self.dt.soa = Data.SOA(
+                    name=domain,
+                    contact=t[1],
+                    serial=int(t[2]),
+                    ttl=soattl,
+                    refresh=parse_ttl(t[3]),
+                    retry=parse_ttl(t[4]),
+                    expire=parse_ttl(t[5]),
+                    minimum=parse_ttl(t[6]),
+                    ns0=t[0],
+                    reverse=False,
+                )
 
                 continue
 
             if lastname is None and (r.addr1 is None or r.addr1 == '@'):
-                # msg('Zone entry: ' + repr(r))
                 lastname = None
             elif r.addr1 is not None:
                 lastname = r.addr1
@@ -629,7 +486,8 @@ class ZoneParser:
 
             self.add_entry(entry)
 
-    #            handle_entry(domain, r2)
+        if buffer:
+            vdns.common.abort(f'Zone parsing ended with data in the buffer: {buffer}')
 
     def show(self) -> None:
         """
@@ -637,47 +495,11 @@ class ZoneParser:
         """
         pprint(self.dt)
 
-#     def make_sql(self) -> None:
-#         """
-#         Return a list of SQL commands
-#         """
-#
-#         dt = self.dt
-#         d = dt.domain
-#
-#         ret = []
-#
-#         ret.extend([ins_a(d, *x) for x in dt.a])
-#         ret.extend([ins_a(d, *x) for x in dt.aaaa])
-#         ret.extend([ins_cname(d, *x) for x in dt.cname])
-#         ret.extend([ins_ns(d, *x) for x in dt.ns])
-#         ret.extend([ins_txt(d, *x) for x in dt.txt])
-#         ret.extend([ins_mx(d, *x) for x in dt.mx])
-#         # for x in dt['a']:           ret.append(ins_a(d, *x))
-#         # for x in dt['aaaa']:        ret.append(ins_a(d, *x))
-#         # for x in dt['cname']:       ret.append(ins_cname(d, *x))
-#         # for x in dt['ns']:          ret.append(ins_ns(d, *x))
-#         # for x in dt['txt']:         ret.append(ins_txt(d, *x))
-#         # for x in dt['mx']:          ret.append(ins_mx(d, *x))
-#
-#         print('\n'.join(ret))
-
     def data(self) -> Data:
         """
         Return the data dictionary
         """
 
         return self.dt
-
-# if __name__=='__main__':
-#    # init()
-#
-#    z=ZoneParser(Config.fn, Config.zone)
-#
-#    if Config.output=='sql':
-#        z.make_sql()
-#    elif Config.output=='dump':
-#        z.show()
-
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

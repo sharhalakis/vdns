@@ -23,7 +23,7 @@
 
 import dataclasses as dc
 
-from typing import List, Optional
+from typing import List
 
 
 @dc.dataclass
@@ -31,12 +31,6 @@ class Config:
     olddir: str = '/etc/bind/db'  # Directory that stores existing config
     outdir: str = 'db/'
     keydir: str = 'keys/'
-
-    dbname: str = 'dns'
-    dbuser: Optional[str] = None
-    dbpass: Optional[str] = None
-    dbhost: Optional[str] = None
-    dbport: int = 5432
 
     domains: List[str] = dc.field(default_factory=list)
     networks: List[str] = dc.field(default_factory=list)

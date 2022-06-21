@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # coding=UTF-8
-#
-import ipaddress
+
 import logging
+import argparse
 import psycopg2
 import psycopg2.extras
+import ipaddress
+import dataclasses as dc
 
-import vdns.rr
+import vdns.util.config
 import vdns.common
 
 from typing import Any, Optional, Union
@@ -17,6 +19,15 @@ _db: Optional['DB'] = None
 class NoDatabaseConnectionError(Exception):
     def __init__(self) -> None:
         Exception.__init__(self, 'No database connection')
+
+
+@dc.dataclass
+class _Config:
+    dbname: str = 'dns'
+    dbuser: Optional[str] = None
+    dbpass: Optional[str] = None
+    dbhost: Optional[str] = None
+    dbport: int = 5432
 
 
 DBReadRow = dict[str, Any]
@@ -53,13 +64,16 @@ class DB:
             self.db.close()
             self.db = None
 
-    def _read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
-        """
-        No logging version
-        """
+    def _query_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> psycopg2.extensions.cursor:
+        """Executes a raw query and returns the cursor."""
         assert self.db is not None
         cur = self.db.cursor()
         cur.execute(query, kwargs)
+        return cur
+
+    def _read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
+        """No logging version."""
+        cur = self._query_raw(query, kwargs)
         colnames = [x.name for x in cur.description]
 
         return [dict(zip(colnames, x)) for x in cur]
@@ -107,6 +121,27 @@ class DB:
             ret = None
 
         return ret
+
+    def _mk_insert(self, table: str, values: QueryArgs) -> str:
+        keys_lst: list[str] = []
+        values_lst: list[str] = []
+        for key in values:
+            keys_lst.append(key)
+            values_lst.append(f'%({key})s')
+
+        st_keys = ', '.join(keys_lst)
+        st_values = ', '.join(values_lst)
+
+        query = f'INSERT INTO {table}({st_keys}) VALUES({st_values})'
+
+        return query
+
+    def insert(self, table: str, values: QueryArgs) -> None:
+        assert self.db is not None
+        query = self._mk_insert(table, values)
+        logging.debug('Executing insert: %s', query)
+        _ = self._query_raw(query, values)
+        self.db.commit()
 
     def store_serial(self, domain: str, newserial: int) -> None:
         """
@@ -208,13 +243,46 @@ class DB:
 # End of class DB
 
 
-def init_db(**kwargs: Any) -> DB:
+def add_args(parser: argparse.ArgumentParser) -> None:
+    """Helper to be used by modules that want a DB connections."""
+    config = _Config()
+    vdns.util.config.set_module_config('db', config)
+
+    parser.add_argument('--dbname', default=config.dbname,
+                        help='Database name (def: %(default)s)')
+    parser.add_argument('--dbuser', default=config.dbuser,
+                        help='Database user (def: %(default)s)')
+    parser.add_argument('--dbhost', default=config.dbhost,
+                        help='Database host (def: %(default)s)')
+    parser.add_argument('--dbport', default=config.dbport,
+                        help='Database port (def: %(default)s)')
+
+
+def handle_args(args: argparse.Namespace) -> None:
+    """Helper to be used by modules that want a DB connections."""
+    config = vdns.util.config.get_config()
+
+    config.dbname = args.dbname
+    config.dbuser = args.dbuser
+    config.dbhost = args.dbhost
+    config.dbport = args.dbport
+
+
+def init_db() -> DB:
     global _db
 
     if _db is not None:
         _db.close()
 
-    _db = DB(**kwargs)
+    # def init_db() -> None:
+    config = vdns.util.config.get_config()
+
+    _db = DB(
+        dbname=config.dbname,
+        dbuser=config.dbuser,
+        dbhost=config.dbhost,
+        dbport=config.dbport,
+    )
 
     return _db
 

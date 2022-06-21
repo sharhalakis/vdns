@@ -1,10 +1,9 @@
-import re
 import logging
 import datetime
 import ipaddress
 import dataclasses as dc
 
-from typing import Any, Optional, Union
+from typing import Any, NoReturn, Sequence, Optional, Union
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 IPInterface = Union[ipaddress.IPv4Interface, ipaddress.IPv6Interface]
@@ -12,9 +11,13 @@ IPNetwork = Union[ipaddress.IPv4Network, ipaddress.IPv6Network]
 
 
 class AbortError(Exception):
-    def __init__(self, *args: Any, excode: int = 1, **kwargs: Any):
+    excode: int
+    error_shown: bool
+
+    def __init__(self, *args: Any, excode: int = 1, error_shown: bool = False, **kwargs: Any):
         """Indicates a program abort with exit code."""
         self.excode = excode
+        self.error_shown = error_shown
         super().__init__(*args, **kwargs)
 
 
@@ -135,17 +138,20 @@ def tabify(st: str, width: int) -> str:
     return st + ('\t' * tabcount)
 
 
-def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str) -> str:
+def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str,
+              multiline_data: Sequence[str] = (), comment: Optional[str] = None) -> str:
     """Formats a record.
 
     This is a dump function that concatenates data, translating ttl
 
     Use mkrecord instead
 
-    @param name     The hostname
-    @param ttl      The TTL in seconds
-    @param rr       The type of the record
-    @param data     A freeform string
+    @param name             The hostname
+    @param ttl              The TTL in seconds
+    @param rr               The type of the record
+    @param data             A freeform string
+    @param multiline_data   Additional data to be added as multiple-lines in parentheses
+    @param comment          An optional comment to be added to the line at the end
     @return The formed entry
     """
 
@@ -155,9 +161,46 @@ def fmtrecord(name: str, ttl: Optional[datetime.timedelta], rr: str, data: str) 
         t = zone_fmttd(ttl)
         ttl2 = t.value
 
-    name = tabify(name, 24)
-    ttl2 = tabify(ttl2, 8)
+    # Make more room for the hostname if there's no ttl. Saves adding an extra tab to hostnames over 24 characters long.
+    if ttl2 != '':
+        name = tabify(name, 24)
+        ttl2 = tabify(ttl2, 8)
+    else:
+        name = tabify(name, 32)
+
     rr = tabify(rr, 8)
+
+    if multiline_data:
+        prefix = '\n' + ('\t' * ((len(name.expandtabs()) + len(ttl2.expandtabs()) + len(rr.expandtabs()) + 8) // 8))
+        data_lines = []
+        if data:
+            if len(multiline_data) > 1:
+                data_lines.append(f'{data} (')
+            else:
+                data_lines.append(data)
+            data_lines.extend(multiline_data)
+        else:
+            # Don't split if there's just one line
+            if len(multiline_data) > 1:
+                data_lines.append(f'( {multiline_data[0]}')
+                data_lines.extend(multiline_data[1:])
+                prefix += '  '
+            else:
+                data_lines.extend(multiline_data)
+
+        if comment:
+            if len(multiline_data) > 1:
+                data_lines.append(f') ; {comment}')
+            else:
+                data_lines.append(f' ; {comment}')
+        else:
+            if len(multiline_data) > 1:
+                data_lines[-1] = f'{data_lines[-1]} )'
+
+        data = prefix.join(data_lines)
+    else:
+        if comment:
+            data = f'{data} ; {comment}'
 
     ret = f'{name}{ttl2}IN\t{rr}{data}'
 
@@ -170,28 +213,84 @@ def split_txt(data: str) -> str:
     @param data     An unquoted string of arbitrary length
     @return A quoted string to be used as TXT record
     """
+    items = split_txt_multiline(data)
+    ret = ' '.join(items)
+
+    return ret
+
+
+def split_txt_multiline(data: str) -> list[str]:
+    """Splits TXT data to chunks of max 255 bytes to comply with bind.
+
+    @param data     An unquoted string of arbitrary length
+    @return A list of quoted strings to be used as TXT record
+    """
     limit = 255
 
     items = []
     data2 = data
     while len(data2) > limit:
-        items.append(data2[:limit])
+        items.append(f'"{data2[:limit]}"')
         data2 = data2[limit:]
-    items.append(data2)
+    items.append(f'"{data2}"')
 
-    ret = '"' + '" "'.join(items) + '"'
+    return items
+
+
+def compact_spaces(st: str) -> str:
+    """Replaces all spaces with a single space and strips leading and trailing spaces.
+
+    Doesn't change spaces within quotes.
+    """
+    st = st.strip()
+    ret = ''
+    in_quotes = False
+    added_space = False
+    for x in st:
+        if x == '"':
+            in_quotes = not in_quotes
+            added_space = False
+            ret += x
+        elif in_quotes:
+            ret += x
+        elif x in ('\t', '\n', '\r', ' '):
+            if not added_space:
+                ret += ' '
+                added_space = True
+        else:
+            added_space = False
+            ret += x
 
     return ret
 
 
-def compact_spaces(st: str) -> str:
-    """Replaces all spaces with a single space and strips leading and trailing spaces."""
-    return re.sub(r'\s+', ' ', st).strip()
+def merge_quotes(st: str) -> str:
+    st = compact_spaces(st)
+
+    ret = ''
+    in_quotes = False
+    for x in st:
+        if x == '"':
+            if not in_quotes:
+                if ret[-2:] == '" ':
+                    ret = ret[:-2]
+                else:
+                    ret += x
+            else:
+                ret += x
+            in_quotes = not in_quotes
+        else:
+            ret += x
+
+    if in_quotes:
+        abort(f'String ended with open quotes: {st}')
+
+    return ret
 
 
-def abort(reason: str) -> None:
+def abort(reason: str) -> NoReturn:
     logging.error('%s', reason)
-    raise AbortError(reason, excode=1)
+    raise AbortError(reason, excode=1, error_shown=True)
 
 
 def validate_dataclass(d: object) -> None:

@@ -133,11 +133,11 @@ class SimpleRRTest(unittest.TestCase):
 
         dnssec = rr.DNSKEY(**dt)
         rec = clean(dnssec.record())
-        self.assertEqual(rec, 'IN DNSKEY 256 3 8 AwEpubkey')
+        self.assertEqual(rec, 'IN DNSKEY 256 3 8 AwEpubkey ; ZSK ; alg = RSASHA256 ; key id = 10')
 
         dnssec.ksk = True
         rec = clean(dnssec.record())
-        self.assertEqual(rec, 'IN DNSKEY 257 3 8 AwEpubkey')
+        self.assertEqual(rec, 'IN DNSKEY 257 3 8 AwEpubkey ; KSK ; alg = RSASHA256 ; key id = 10')
 
         ds = rr.DS(**dt)
         ds.hostname = 'sub'
@@ -156,7 +156,7 @@ class SimpleRRTest(unittest.TestCase):
         self.maxDiff = 5000  # So that the output is fully shown if the test fails
         # pylint: disable=line-too-long
         pubkey = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArgfNQ7zQSn5ALRG1usOotYIqHkbFVE1lo+9oATcHVz4YXlyGNAU1fvmaS5V4KAdOAMIHrWQllWR54NybF/gFqxgfCfTa+dZkO3bMTIVo0mwTWAmqEY+8C3vwWWiaGtBVbcNW1m5V1cHcg4PnFhH/sJLSqQ3BfnLTwIEwRQF6bsCt493+QSTquX5eoc/FdVCK/Y+y+Imi4zKSm/Txk0OPllsvS5KAxRUimX34iG2dSfHlYwEDJAGQuh2crIEp1KQXMGmi0iu1KbIlaQ3nPVHn5PJ2Wka6F2AjL1GzRyN2a+frIAYufesTWV+CDyyTSvfk/HbVrrIpj6W0l7TTJ10gjQIDAQAB'  # noqa: E501
-        txt = '"v=DKIM1; g=*; k=rsa; s=email; t=s; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArgfNQ7zQSn5ALRG1usOotYIqHkbFVE1lo+9oATcHVz4YXlyGNAU1fvmaS5V4KAdOAMIHrWQllWR54NybF/gFqxgfCfTa+dZkO3bMTIVo0mwTWAmqEY+8C3vwWWiaGtBVbcNW1m5V1cHcg4PnFhH/sJLSqQ3BfnLTwIEwRQF6bsCt49" "3+QSTquX5eoc/FdVCK/Y+y+Imi4zKSm/Txk0OPllsvS5KAxRUimX34iG2dSfHlYwEDJAGQuh2crIEp1KQXMGmi0iu1KbIlaQ3nPVHn5PJ2Wka6F2AjL1GzRyN2a+frIAYufesTWV+CDyyTSvfk/HbVrrIpj6W0l7TTJ10gjQIDAQAB"'  # noqa: E501
+        txt = '( "v=DKIM1; g=*; k=rsa; s=email; t=s; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArgfNQ7zQSn5ALRG1usOotYIqHkbFVE1lo+9oATcHVz4YXlyGNAU1fvmaS5V4KAdOAMIHrWQllWR54NybF/gFqxgfCfTa+dZkO3bMTIVo0mwTWAmqEY+8C3vwWWiaGtBVbcNW1m5V1cHcg4PnFhH/sJLSqQ3BfnLTwIEwRQF6bsCt49" "3+QSTquX5eoc/FdVCK/Y+y+Imi4zKSm/Txk0OPllsvS5KAxRUimX34iG2dSfHlYwEDJAGQuh2crIEp1KQXMGmi0iu1KbIlaQ3nPVHn5PJ2Wka6F2AjL1GzRyN2a+frIAYufesTWV+CDyyTSvfk/HbVrrIpj6W0l7TTJ10gjQIDAQAB" )'  # noqa: E501
         # pylint: enable=line-too-long
         dkim.key_pub = pubkey
         rec = clean(dkim.record())

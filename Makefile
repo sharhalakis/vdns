@@ -1,5 +1,5 @@
 MYPY=mypy --ignore-missing-imports --disallow-untyped-defs
-PYCODESTYLE=pycodestyle --max-line-length=132 --ignore=E266,W503
+PYCODESTYLE=pycodestyle --max-line-length=132 --ignore=E266,E501,W503
 
 all: lint mypy tests
 

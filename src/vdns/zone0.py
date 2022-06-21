@@ -132,7 +132,10 @@ class Zone0:
 
         rec: vdns.rr.RR
         recs: Sequence[vdns.rr.RR]
-        reclist: RRTypeList
+
+        # All records that may have entries for a host
+        reclist: RRTypeList = [self.dt.data.mx, self.dt.data.cnames, self.dt.data.txt, self.dt.data.dkim,
+                               self.dt.data.srv, self.dt.data.sshfp]
 
         # Determine entries to be excluded
         # - since we added them previously
@@ -141,10 +144,7 @@ class Zone0:
                 done.append(rec.hostname)
 
         # Examine all hosts
-        #        hosts2=dict([(h['ip'], h) for h in self.dt['hosts']])
-        #        ips=hosts2.keys()
-        #        ips.sort()
-        for rec in sorted(self.dt.data.hosts, key=lambda x: x.sort_key):
+        for rec in sorted(self.dt.data.hosts):
             hostname = rec.hostname
             if hostname == '':
                 continue
@@ -157,10 +157,10 @@ class Zone0:
             # First do IP addresses
             rec2: vdns.rr.RR
             recs2: Sequence[vdns.rr.RR]
-            reclist2: RRTypeList
 
             # The first one includes the hostname part so handle it separately
             is_first: bool = True
+
             # Do 'A' first, then 'AAAA'
             for rrname in ('A', 'AAAA'):
                 for host in self.dt.data.hosts:
@@ -177,38 +177,56 @@ class Zone0:
                         host2.hostname = ''
                         ret += host2.record()
 
-            # Add additional info here
-            reclist2 = [self.dt.data.txt, self.dt.data.sshfp]
-            for recs2 in reclist2:
+            # Add additional info here - entries that will have their host part omitted
+            for recs2 in reclist:
                 for rec2 in recs2:
-                    if rec2.hostname != hostname:
+                    # Look for relevant entries
+                    if rec2.associated_hostname != hostname:
                         continue
-                    rec3 = copy.deepcopy(rec2)
-                    rec3.hostname = ''
-                    ret += rec3.record()
 
-            # CNAMEs are special. We look for cnames that are
-            # pointing to this host
-            for cname in self.dt.data.cnames:
-                if cname.hostname0 != hostname:
-                    continue
-                ret += cname.record()
-                done.append(cname.hostname)
+                    # Entries with a different cooked hostname (like "_spf.host") should not be added here because
+                    # we're skipping the hostname part. They will be listed after the empty-hostname entries.
+                    if rec2.cooked_hostname != hostname:
+                        continue
 
-            # Add DKIM here (last) as it has a hostname part
-            for dkim in self.dt.data.dkim:
-                if dkim.hostname != hostname:
-                    continue
-                ret += dkim.record()
+                    if is_first:
+                        ret += rec2.record()
+                        is_first = False
+                    else:
+                        rec3 = copy.deepcopy(rec2)
+                        rec3.hostname = ''
+                        ret += rec3.record()
 
-        # Now do the rest cnames
-        reclist = [self.dt.data.cnames, self.dt.data.txt]
-        for recs in reclist:
-            ret += '\n'
-            for rec in sorted(recs, key=lambda x: x.sort_key):
+            # ------------------------------------------------------------
+            # Only entries that have a non-empty hostname below this point
+            # ------------------------------------------------------------
+
+            # Add records that relate to this host via associated_hostname
+            # - TXT records hold SPF records which are better listed close to the associated host
+            # - CNAMEs are special. We look for cnames that are pointing to this host
+            # - DKIMs always have a hostname part
+            for recs2 in reclist:
+                for rec2 in recs2:
+                    # Look for relevant entries
+                    if rec2.associated_hostname != hostname:
+                        continue
+
+                    # Entries with a matching hostname have already been added with an empty hostname
+                    if rec2.cooked_hostname == hostname:  # rec2.associated_hostname:
+                        continue
+
+                    ret += rec2.record()
+
+        # Now do the rest entries
+        last_nl_idx = -1  # Last index that a newline was added
+        for idx, recs in enumerate(reclist):
+            for rec in sorted(recs):
                 if rec.hostname == '':
                     continue
-                if rec.hostname not in done:
+                if rec.associated_hostname not in done:
+                    if last_nl_idx != idx:
+                        ret += '\n'
+                        last_nl_idx = idx
                     ret += rec.record()
 
         return ret
@@ -227,7 +245,7 @@ class Zone0:
         # hosts = {}
         host: vdns.rr.Host
         hosts: list[vdns.rr.Host] = []
-        for host in sorted(self.dt.data.hosts, key=lambda x: x.as_ipv6):
+        for host in sorted(self.dt.data.hosts):
             # Skip entries that are not designated as reverse
             if not host.reverse:
                 continue

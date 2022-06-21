@@ -1,12 +1,17 @@
 import datetime
 import unittest
 import parameterized
+from parameterized import param
 
 import vdns.common
 
-from typing import Type, Union
+from typing import Optional, Sequence, Type, Union
 
 AbortError = vdns.common.AbortError
+
+# Helpers
+td_1h = datetime.timedelta(hours=1)
+td_1d = datetime.timedelta(days=1)
 
 
 class CommonTest(unittest.TestCase):
@@ -56,14 +61,69 @@ class CommonTest(unittest.TestCase):
             vdns.common.zone_fmttd(datetime.timedelta(0))
 
     @parameterized.parameterized.expand([
+        param('host', 'A', '10.1.1.1', 'host IN A 10.1.1.1'),
+        param('host', 'A', '10.1.1.1', 'host 1D IN A 10.1.1.1', ttl=td_1d),
+        param('host', 'A', '10.1.1.1', 'host IN A 10.1.1.1 ; comment', comment='comment'),
+
+        # multiline_data
+        param('host', 'TXT', 'some text', 'host IN TXT some text ( line1\nline2 )', multiline_data=('line1', 'line2')),
+        param('host', 'TXT', '', 'host IN TXT ( line1\nline2 )', multiline_data=('line1', 'line2')),
+        param('host', 'TXT', 'some text', 'host IN TXT some text line1', multiline_data=('line1',)),
+
+        # comment with multiline data
+        param('host', 'TXT', '', 'host IN TXT line1 ; comment', multiline_data=('line1',), comment='comment'),
+        param('host', 'TXT', 'some text', 'host IN TXT some text line1 ; comment',
+              multiline_data=('line1',), comment='comment'),
+        param('host', 'TXT', 'some text', 'host IN TXT some text ( line1\nline2 ) ; comment',
+              multiline_data=('line1', 'line2'), comment='comment'),
+
+        # tabulation works ok
+        param('host', 'A', '10.1.1.1', 'host\t\t\t\tIN\tA\t10.1.1.1', ignorespaces=False),
+        param('host', 'A', '10.1.1.1', 'host\t\t\t1D\tIN\tA\t10.1.1.1', ttl=td_1d, ignorespaces=False),
+        # ttl's tab is skipped for hostnames > 24 characters
+        param('very-very-very-long-hostname', 'A', '10.1.1.1', 'very-very-very-long-hostname\tIN\tA\t10.1.1.1',
+              ignorespaces=False),
+    ])
+    def test_fmtrecord(self, name: str, rr: str, data: str, expected: str,
+                       ttl: Optional[datetime.datetime] = None, multiline_data: Sequence[str] = (),
+                       comment: Optional[str] = None, ignorespaces: bool = True) -> None:
+        res = vdns.common.fmtrecord(name=name, ttl=ttl, rr=rr, data=data, multiline_data=multiline_data,
+                                    comment=comment)
+        if ignorespaces:
+            res = vdns.common.compact_spaces(res)
+            expected = vdns.common.compact_spaces(expected)
+        self.assertEqual(res, expected)
+
+    @parameterized.parameterized.expand([
         ('a b c', 'a b c'),
         ('abc', 'abc'),
         ('a   b\tc', 'a b c'),
         ('   a     b c   ', 'a b c'),
         ('\ta \t b c \t ', 'a b c'),
+        # Handle quotes
+        ('  "a b c " ', '"a b c "'),
+        # Preserve spaces in quotes
+        (' "  a  b  c" ', '"  a  b  c"'),
     ])
     def test_compact_spaces(self, line: str, result: str) -> None:
         self.assertEqual(vdns.common.compact_spaces(line), result)
+
+    @parameterized.parameterized.expand([
+        # Simple case
+        ('"ab" "cd" "ef"', '"abcdef"'),
+        # Preserve spaces in quotes
+        ('"ab "  "cd"  "   ef"', '"ab cd   ef"'),
+        ('"ab "  " cd "  "   ef"', '"ab  cd    ef"'),
+        # Unterminated strings
+        ('"ab "  "cd"  "   ef', None),
+        ('"ab', None),
+    ])
+    def test_merge_quotes(self, line: str, result: Optional[str]) -> None:
+        if result is None:
+            with self.assertRaises(vdns.common.AbortError):
+                vdns.common.merge_quotes(line)
+        else:
+            self.assertEqual(vdns.common.merge_quotes(line), result)
 
     @parameterized.parameterized.expand([
         ('test', 8, 'test\t'),

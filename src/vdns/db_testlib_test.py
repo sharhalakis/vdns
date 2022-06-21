@@ -16,7 +16,7 @@ class TestlibTest(unittest.TestCase):
 
     def setUp(self) -> None:
         db_testlib.init()
-        vdns.db.init_db(dbname='somedb')
+        vdns.db.init_db()
         self._db = db_testlib.get_db()
         db_testlib.add_test_data()
 
