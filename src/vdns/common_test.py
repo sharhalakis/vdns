@@ -85,7 +85,7 @@ class CommonTest(unittest.TestCase):
               ignorespaces=False),
     ])
     def test_fmtrecord(self, name: str, rr: str, data: str, expected: str,
-                       ttl: Optional[datetime.datetime] = None, multiline_data: Sequence[str] = (),
+                       ttl: Optional[datetime.timedelta] = None, multiline_data: Sequence[str] = (),
                        comment: Optional[str] = None, ignorespaces: bool = True) -> None:
         res = vdns.common.fmtrecord(name=name, ttl=ttl, rr=rr, data=data, multiline_data=multiline_data,
                                     comment=comment)

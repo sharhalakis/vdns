@@ -5,7 +5,7 @@ import parameterized
 
 import vdns.rr
 import vdns.common
-import vdns.zoneparser
+import vdns.parsing
 from vdns import keyparser
 
 from typing import Iterable
@@ -39,7 +39,7 @@ class KeyparserTest(unittest.TestCase):
                                          oeCbwX52IOeUK+ZYD1A9PXF3F2sCvT/EoU+M/c+7stYAjKhNKo7qqWgV
                                          VOuRnsR0+FM=0 )
         ''')
-        dt = vdns.zoneparser.parse_line(st)
+        dt = vdns.parsing.parse_line(st)
         assert dt is not None  # Should never happen with a valid st
         res = keyparser.parse_pub_key_line(dt)
         self.assertEqual(res.zone, 'example.com.')

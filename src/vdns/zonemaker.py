@@ -70,6 +70,9 @@ class ZoneMaker:
 
         return ret
 
+    def _zonemaker_factory(self, domain: str) -> 'ZoneMaker':
+        return ZoneMaker(domain, zonedir=self.zonedir)
+
     def get_sources(self) -> SourceList:
         if self.sources is None:
             self.sources = self._mksources()
@@ -152,25 +155,25 @@ class ZoneMaker:
             ret.data += srcdt
 
         # Get subdomain data
-        for subsoa in main.subdomains:
-            subname = subsoa.name
+        for subdomain in main.subdomains:
             ldom = len(domain)
-            if not subname.endswith(f'.{domain}'):
-                logging.error('WTF? Bad subdomain: %s - %s', domain, subname)
+            if not subdomain.endswith(f'.{domain}'):
+                logging.error('WTF? Bad subdomain: %s - %s', domain, subdomain)
                 raise Exception('Something went bad')
 
-            subz = ZoneMaker(subname, zonedir=self.zonedir)
+            subz = self._zonemaker_factory(subdomain)
             dt = subz.get_zone_data()
             if dt is None:
                 continue
 
-            subdata = vdns.zone0.ZoneData.SubdomainData(soa=subsoa)
-            ret.subs[subname] = subdata
+            # subdata = vdns.zone0.ZoneData.SubdomainData(soa=subsoa)
+            subdata = vdns.zone0.ZoneData.SubdomainData(name=subdomain)
+            ret.subs[subdomain] = subdata
 
             # This will give us the 'host' part
             # For subdomain of hell.gr named test1.test2.hell.gr, this
             # will contain test1.test2
-            h = subname[:-(ldom + 1)]
+            h = subdomain[:-(ldom + 1)]
 
             # Get DS info for all KSK DNSSEC entries of that domain
             for dnssec in dt.data.dnssec:

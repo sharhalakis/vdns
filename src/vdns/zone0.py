@@ -8,16 +8,14 @@ import vdns.common
 
 from typing import Any, Optional, Sequence
 
-# We use this a lot in this file. Must be Sequence and not list/tuple
-RRTypeList = Sequence[Sequence[vdns.rr.RR]]
-
 
 @dc.dataclass
 class ZoneData:
 
     @dc.dataclass
     class SubdomainData:
-        soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)
+        name: str
+        # soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)
         ns: list[vdns.rr.NS] = dc.field(default_factory=list)
         ds: list[vdns.rr.DS] = dc.field(default_factory=list)
         glue: list[vdns.rr.Host] = dc.field(default_factory=list)
@@ -28,6 +26,7 @@ class ZoneData:
     dbdata: dict[str, Any] = dc.field(default_factory=dict)
 
     sources: list[vdns.src.src0.Source] = dc.field(default_factory=list)  # The source objects
+    # TODO: We have a SOA here and a SOA in data
     soa: vdns.rr.SOA = dc.field(default_factory=vdns.rr.SOA)    # Zone's SOA. Formerly known as "zone"
     data: vdns.src.src0.DomainData = dc.field(default_factory=vdns.src.src0.DomainData)  # The actual records
     subs: dict[str, SubdomainData] = dc.field(default_factory=dict)  # Subdomain data
@@ -68,29 +67,30 @@ class Zone0:
         ret = ''
         data = self.dt.data
 
-        reclist: RRTypeList
-        dnskey: list[vdns.rr.DNSKEY] = [vdns.rr.DNSKEY.from_dnssec(x) for x in data.dnssec]
-
-        # for recs in [data.ns, data.mx, dnskey, data.txt]:
-        reclist = [data.ns, data.mx, dnskey, data.txt]
-        for recs in reclist:
+        # Top-level entries without a host part first
+        for recs in data.toplevel_reclist:
             for rec in recs:
-                if rec.hostname is not None and rec.hostname not in ('', '.'):
+                if rec.associated_hostname or rec.cooked_hostname:
                     continue
+                # Transform DNSSEC to DNSKEY
+                if isinstance(rec, vdns.rr.DNSSEC):
+                    rec = vdns.rr.DNSKEY.from_dnssec(rec)
                 ret += rec.record()
 
+        # Host entries
         if not self.dt.reverse:
             for rec in data.hosts:
-                if rec.hostname != '':
+                if rec.associated_hostname:
                     continue
                 ret += rec.record()
 
-        # Add DKIM and SRV here (last) since they have a host part
-        reclist = [data.dkim, data.srv]
-        for recs in reclist:
+        # Top-level entries with a host part next, like DKIM and SRV
+        for recs in data.toplevel_reclist:
             for rec in recs:
-                if rec.hostname != '':
+                if rec.associated_hostname or not rec.cooked_hostname:
                     continue
+                if isinstance(rec, vdns.rr.DNSSEC):
+                    rec = vdns.rr.DNSKEY.from_dnssec(rec)
                 ret += rec.record()
 
         return ret
@@ -106,7 +106,7 @@ class Zone0:
 
         for _, subdata in sorted(self.dt.subs.items()):
             ret += '\n'
-            subsoa_rrs: list[Sequence[vdns.rr.RR]] = [subdata.ns, subdata.ds]
+            subsoa_rrs: vdns.src.src0.RRTypeList = [subdata.ns, subdata.ds]
             for recs in subsoa_rrs:
                 for rec in recs:
                     ret += rec.record()
@@ -132,10 +132,6 @@ class Zone0:
 
         rec: vdns.rr.RR
         recs: Sequence[vdns.rr.RR]
-
-        # All records that may have entries for a host
-        reclist: RRTypeList = [self.dt.data.mx, self.dt.data.cnames, self.dt.data.txt, self.dt.data.dkim,
-                               self.dt.data.srv, self.dt.data.sshfp]
 
         # Determine entries to be excluded
         # - since we added them previously
@@ -178,7 +174,7 @@ class Zone0:
                         ret += host2.record()
 
             # Add additional info here - entries that will have their host part omitted
-            for recs2 in reclist:
+            for recs2 in self.dt.data.host_reclist:
                 for rec2 in recs2:
                     # Look for relevant entries
                     if rec2.associated_hostname != hostname:
@@ -205,7 +201,7 @@ class Zone0:
             # - TXT records hold SPF records which are better listed close to the associated host
             # - CNAMEs are special. We look for cnames that are pointing to this host
             # - DKIMs always have a hostname part
-            for recs2 in reclist:
+            for recs2 in self.dt.data.host_reclist:
                 for rec2 in recs2:
                     # Look for relevant entries
                     if rec2.associated_hostname != hostname:
@@ -219,7 +215,7 @@ class Zone0:
 
         # Now do the rest entries
         last_nl_idx = -1  # Last index that a newline was added
-        for idx, recs in enumerate(reclist):
+        for idx, recs in enumerate(self.dt.data.host_reclist):
             for rec in sorted(recs):
                 if rec.hostname == '':
                     continue
@@ -250,11 +246,7 @@ class Zone0:
             if not host.reverse:
                 continue
 
-            # x['net_domain'] = self.dt['_domain']      # TODO: Is the replacement correct? Is _domain == domain?
             ptr = vdns.rr.PTR.from_host(host, self.dt.domain)
-            # # k = b'%d-%s' % (host.ip.version, host.ip.packed)
-            # k = b'%d-%b' % (host.ip.version, host.ip.packed)
-            # hosts[k] = ptr
             hosts.append(ptr)
 
         for rec in sorted(hosts):
@@ -277,16 +269,13 @@ class Zone0:
         """
         Make the key files
 
-        Returns a list of entries. Each entry is a tuple of:
-        (type, fn, contents)
-        Where type is 'key' or 'private'
+        Returns a list of entries. Each entry is MakeKeysItem
         """
 
         ret: list[Zone0.MakeKeysItem] = []
 
         x: vdns.rr.DNSSEC
         for x in self.dt.data.dnssec:
-            # fn0 = 'K%s.+%03d+%d' % (x.domain, x.algorithm, x.keyid)
             fn0 = f'K{x.domain}.+{x.algorithm:03}+{x.keyid}'
 
             item = self.MakeKeysItem(
@@ -302,14 +291,6 @@ class Zone0:
                 st_key=x.st_key_priv,
             )
             ret.append(item)
-
-            # fn = fn0 + '.key'
-            # rec = ('key', fn, x['st_key_pub'])
-            # ret.append(rec)
-
-            # fn = fn0 + '.private'
-            # rec = ('private', fn, x['st_key_priv'])
-            # ret.append(rec)
 
         return ret
 

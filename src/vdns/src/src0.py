@@ -8,7 +8,9 @@ import dataclasses as dc
 
 import vdns.rr
 
-from typing import Optional
+from typing import Optional, Sequence
+
+RRTypeList = Sequence[Sequence[vdns.rr.RR]]
 
 
 @dc.dataclass
@@ -26,7 +28,8 @@ class DomainData:
     sshfp: list[vdns.rr.SSHFP] = dc.field(default_factory=list)
     dkim: list[vdns.rr.DKIM] = dc.field(default_factory=list)
     srv: list[vdns.rr.SRV] = dc.field(default_factory=list)
-    subdomains: list[vdns.rr.SOA] = dc.field(default_factory=list)
+    subdomains: list[str] = dc.field(default_factory=list)
+    # subdomains: list[vdns.rr.SOA] = dc.field(default_factory=list)
 
     def __iadd__(self, other: 'DomainData') -> 'DomainData':
         self.mx += other.mx
@@ -46,6 +49,16 @@ class DomainData:
     def reverse(self) -> bool:
         """Returns true if this is a reverse zone."""
         return self.network is not None
+
+    @property
+    def host_reclist(self) -> RRTypeList:
+        """Non-A/AAAA reclist for hosts. These are the RRs that accompany a host (A/AAAA)."""
+        return [self.mx, self.cnames, self.txt, self.dkim, self.srv, self.sshfp]
+
+    @property
+    def toplevel_reclist(self) -> RRTypeList:
+        """Non-A/AAAA reclist for domains. These are the RRs that are added at the top level."""
+        return [self.ns, self.mx, self.dnssec, self.txt, self.dkim, self.sshfp, self.srv]
 
 
 class Source:

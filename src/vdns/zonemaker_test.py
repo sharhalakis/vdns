@@ -5,8 +5,8 @@ import unittest
 import vdns.db_testlib
 import vdns.src.dynamic_testlib
 import vdns.common
+import vdns.parsing
 import vdns.zonemaker
-import vdns.zoneparser
 
 from typing import Sequence, Union
 
@@ -93,7 +93,7 @@ class TestZoneMaker(unittest.TestCase):
         assert allowed or forbidden, 'One of allowed or forbidden must be passed'
 
         for line in lines:
-            r = vdns.zoneparser.parse_line(line)
+            r = vdns.parsing.parse_line(line)
             if not r:
                 continue
             if allowed:

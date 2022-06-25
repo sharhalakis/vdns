@@ -9,7 +9,7 @@ import dataclasses as dc
 
 import vdns.rr
 import vdns.common
-import vdns.zoneparser
+import vdns.parsing
 
 from typing import Optional
 
@@ -98,7 +98,7 @@ def calc_ds_sigs(owner: str, flags: int, protocol: int, algorithm: int, st: str)
     return ret
 
 
-def parse_pub_key_line(dt: vdns.zoneparser.ParsedLine) -> ParsedPubKeyLine:
+def parse_pub_key_line(dt: vdns.parsing.ParsedLine) -> ParsedPubKeyLine:
     """Further parses a DNSKEY line.
 
     The returned zone is the exact name that's listed in the line, including a potential dot at the end.
@@ -173,17 +173,17 @@ def _parse(domain: str, st_pub: str, st_priv: str) -> Optional[vdns.rr.DNSSEC]:
     in_parentheses = False
 
     for line in st_pub.splitlines():
-        line = vdns.zoneparser.cleanup_line(line)
+        line = vdns.parsing.cleanup_line(line)
         if not line:
             continue
 
         buffer.append(line)
-        in_parentheses = vdns.zoneparser.line_ends_in_parentheses(line, in_parentheses)
+        in_parentheses = vdns.parsing.line_ends_in_parentheses(line, in_parentheses)
         if in_parentheses:
             continue
-        line2 = vdns.zoneparser.merge_multiline(buffer, True)
+        line2 = vdns.parsing.merge_multiline(buffer, True)
 
-        parsed_line = vdns.zoneparser.parse_line(line2)
+        parsed_line = vdns.parsing.parse_line(line2)
         if not parsed_line or parsed_line.rr != 'DNSKEY':
             vdns.common.abort(f'Unhandled line: {line2}')
 

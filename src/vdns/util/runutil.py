@@ -26,6 +26,7 @@ import logging
 import argparse
 import collections
 import vdns.common
+import vdns.util.test
 import vdns.util.config
 import vdns.util.export
 import vdns.util.import_key
@@ -34,6 +35,7 @@ from typing import Optional
 
 modules = collections.OrderedDict([
     ('export', vdns.util.export),
+    ('test', vdns.util.test),
     ('import-key', vdns.util.import_key),
 ])
 

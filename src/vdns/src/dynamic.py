@@ -1,8 +1,6 @@
 import os
 import errno
 import logging
-import datetime
-import ipaddress
 
 import vdns.db
 import vdns.rr
@@ -99,31 +97,30 @@ class Dynamic(vdns.src.src0.Source):
             vdns.common.abort(f'Could not open file for dynamic hosts for {self.domain}')
 
         # Add information from the file
-        for rrtype, entries in (('a', zoneinfo.a), ('aaaa', zoneinfo.aaaa)):
-            for entry in entries:
-                if entry[0] is None:
-                    hn = ''
-                else:
-                    hn = entry[0]
+        for host in zoneinfo.hosts:
+            if host.hostname is None:
+                hn = ''
+            else:
+                hn = host.hostname
 
-                # Only handle file entries that exist in the dynamic table
-                if hn not in ret:
-                    continue
+            # Only handle file entries that exist in the dynamic table
+            if hn not in ret:
+                continue
 
-                if entry[2]:
-                    ttl = datetime.timedelta(0, entry[2])
-                else:
-                    ttl = None
+            # TODO: Get rid of a/aaaa and just return a list of all host entries
+            if host.ip.version == 4:
+                rrtype = 'a'
+            else:
+                rrtype = 'aaaa'
 
-                ip = ipaddress.ip_address(entry[1])
-                ret[hn][rrtype].append({
-                    'domain': self.domain,
-                    'hostname': hn,
-                    'ip': ip,
-                    'ip_str': ip.compressed,
-                    'ttl': ttl,
-                    'reverse': False,
-                })
+            ret[hn][rrtype].append({
+                'domain': self.domain,
+                'hostname': hn,
+                'ip': host.ip,
+                'ip_str': host.ip.compressed,
+                'ttl': host.ttl,
+                'reverse': False,
+            })
 
         #        pprint(zoneinfo)
         #        pprint(ret)

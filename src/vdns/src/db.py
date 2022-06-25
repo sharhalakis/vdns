@@ -95,7 +95,8 @@ class DB(vdns.src.src0.Source):
 
         # Also store subdomains
         subs = self.db.get_subdomains(dom)
-        ret.subdomains = self._mkrr(subs, vdns.rr.SOA)
+        ret.subdomains = [x['name'] for x in subs]
+        # ret.subdomains = self._mkrr(subs, vdns.rr.SOA)
 
         return ret
 

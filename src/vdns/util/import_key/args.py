@@ -4,7 +4,7 @@ import dataclasses as dc
 
 import vdns.db
 import vdns.util.config
-import vdns.zoneparser
+import vdns.parsing
 
 from typing import Optional
 
@@ -35,7 +35,7 @@ def handle_args(args: argparse.Namespace) -> None:
     config.domain = args.domain
     config.keyfile = args.keyfile
     if args.ttl:
-        config.ttl = datetime.timedelta(seconds=vdns.zoneparser.parse_ttl(args.ttl.upper()))
+        config.ttl = datetime.timedelta(seconds=vdns.parsing.parse_ttl(args.ttl.upper()))
 
     vdns.db.handle_args(args)
 
