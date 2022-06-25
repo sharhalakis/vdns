@@ -35,7 +35,8 @@ disable=
 	too-many-instance-attributes,
 	too-many-public-methods,
 	global-statement,
-	pointless-string-statement
+	pointless-string-statement,
+	similarities
 
 
 ## Disable the message, report, category or checker with the given id(s). You
@@ -225,6 +226,9 @@ single-line-if-stmt=yes
 
 #V# # Maximum number of lines in a module
 #V# max-module-lines=99999
+
+[SIMILARITIES]
+ignore-imports=yes
 
 [STRING]
 
