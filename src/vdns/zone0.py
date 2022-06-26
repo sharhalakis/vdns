@@ -104,14 +104,23 @@ class Zone0:
         ret = ''
         glue = ''
 
+        nl_added: bool
+
         for _, subdata in sorted(self.dt.subs.items()):
-            ret += '\n'
+            nl_added = False
+
             subsoa_rrs: vdns.src.src0.RRTypeList = [subdata.ns, subdata.ds]
             for recs in subsoa_rrs:
                 for rec in recs:
+                    if not nl_added:
+                        ret += '\n'
+                        nl_added = True
                     ret += rec.record()
 
             for rec in subdata.glue:
+                if not nl_added:
+                    ret += '\n'
+                    nl_added = True
                 glue += rec.record()
 
         if glue != '':

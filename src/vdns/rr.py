@@ -5,13 +5,28 @@ import ipaddress
 
 import vdns.db
 import vdns.common
+import vdns.parsing
 
-from typing import Any, Dict, Optional, Sequence, Type, TypeVar, Union
+from typing import Any, Dict, Optional, Protocol, Sequence, Type, TypeVar, Union
+
+
+T = TypeVar('T', bound='RR')
 
 
 class BadRecordError(Exception):
     def __init__(self, msg: str, record: 'RR'):
         super().__init__(f'{msg}: {record}')
+
+
+class ParseLineInput(Protocol):
+    addr1: Optional[str]
+    ttl: Optional[datetime.timedelta]
+    addr2: str
+
+
+class ParseError(Exception):
+    def __init__(self, msg: str, r: ParseLineInput) -> None:
+        super().__init__(f'{msg}. addr1="{r.addr1}, addr2={r.addr2}')
 
 
 class _StringRecord:
@@ -110,7 +125,7 @@ class RR:
         return ret
 
     def _records(self) -> Union[_StringRecord, list[_StringRecord]]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def record(self) -> str:
         self.validate()
@@ -119,6 +134,10 @@ class RR:
             records = [records]
 
         return self.make_string(records)
+
+    @classmethod
+    def parse_line(cls: Type[T], domain: str, r: ParseLineInput) -> T:
+        raise NotImplementedError
 
     @property
     def sort_key(self) -> Any:
@@ -174,6 +193,13 @@ class MX(RR):
             ret.needsdot = True
         return ret
 
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'MX':
+        dt = r.addr2.split(None, 1)
+        # pylint: disable=unexpected-keyword-arg
+        return MX(domain=domain, hostname=r.addr1, priority=int(dt[0]), mx=dt[1], ttl=r.ttl)
+        # pylint: enable=unexpected-keyword-arg
+
 
 @dc.dataclass(kw_only=True)
 class NS(RR):
@@ -184,6 +210,12 @@ class NS(RR):
         if self.ns.count('.') >= 2:
             ret.needsdot = True
         return ret
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'NS':
+        # pylint: disable=unexpected-keyword-arg
+        return NS(domain=domain, hostname=r.addr1, ns=r.addr2, ttl=r.ttl)
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass(kw_only=True)
@@ -211,6 +243,12 @@ class Host(RR):
     @property
     def sort_key(self) -> Any:
         return self.as_ipv6
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'Host':
+        # pylint: disable=unexpected-keyword-arg
+        return Host(domain=domain, hostname=r.addr1, ip=ipaddress.ip_address(r.addr2), ttl=r.ttl, reverse=False)
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass(kw_only=True)
@@ -250,6 +288,12 @@ class PTR(Host):
     def sort_key(self) -> Any:
         return b'%d-%b' % (self.ip.version, self.ip.packed)
 
+    @classmethod
+    def parse_line(cls: Type['PTR'], domain: str, r: ParseLineInput) -> 'PTR':
+        # pylint: disable=unexpected-keyword-arg
+        raise NotImplementedError
+        # pylint: enable=unexpected-keyword-arg
+
 
 @dc.dataclass(kw_only=True)
 class CNAME(RR):
@@ -267,6 +311,12 @@ class CNAME(RR):
     @property
     def associated_hostname(self) -> Optional[str]:
         return self.hostname0
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'CNAME':
+        # pylint: disable=unexpected-keyword-arg
+        return CNAME(domain=domain, hostname=r.addr1, hostname0=r.addr2, ttl=r.ttl)
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass(kw_only=True)
@@ -291,6 +341,16 @@ class TXT(RR):
         if self.hostname and self.hostname.startswith('_spf.'):
             return self.hostname.removeprefix('_spf.')
         return self.hostname
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'TXT':
+        txt = r.addr2
+        if txt[0] == '"' and txt[-1] == '"':
+            txt = txt[1:-1]
+
+        # pylint: disable=unexpected-keyword-arg
+        return TXT(domain=domain, hostname=r.addr1, txt=txt, ttl=r.ttl)
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass(kw_only=True)
@@ -349,6 +409,48 @@ class DNSKEY(DNSSEC):
         """Constructs a DNSKEY class from a DNSSEC class."""
         return DNSKEY(**dc.asdict(dnssec))
 
+    @classmethod
+    def _parse_dnskey(cls, addr: str) -> 'DNSKEY':
+        now = datetime.datetime.fromtimestamp(0)
+
+        pl = vdns.parsing.ParsedLine(
+            addr1='something',
+            addr2=addr,
+            rr='DNSKEY',
+        )
+        r = vdns.parsing.parse_pub_key_line(pl)
+
+        # Caller must set domain, hostname and ttl.
+        # pylint: disable=unexpected-keyword-arg
+        dnssec = vdns.rr.DNSSEC(
+            domain='',
+            hostname='',
+            ttl=None,
+            keyid=r.keyid,
+            ksk=r.ksk,
+            algorithm=r.algorithm,
+            digest_sha1=r.sha1,
+            digest_sha256=r.sha256,
+            key_pub=r.key_pub,
+            st_key_pub='',
+            st_key_priv='',
+            ts_created=now,
+            ts_activate=now,
+            ts_publish=now
+        )
+        # pylint: enable=unexpected-keyword-arg
+        return cls.from_dnssec(dnssec)
+
+    @classmethod
+    def parse_line(cls: Type['DNSKEY'], domain: str, r: ParseLineInput) -> 'DNSKEY':
+        if r.addr1:
+            raise ParseError('DNSKEY record with non-empty hostname', r)
+        ret = cls._parse_dnskey(r.addr2)
+        ret.hostname = r.addr1
+        ret.domain = domain
+        ret.ttl = r.ttl
+        return ret
+
 
 @dc.dataclass(kw_only=True)
 class DS(DNSSEC):
@@ -363,6 +465,36 @@ class DS(DNSSEC):
         """Constructs a DS class from a DNSSEC class."""
         return DS(**dc.asdict(dnssec))
 
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'DS':
+        if not r.addr1:
+            raise ParseError('DS record without a hostname', r)
+
+        now = datetime.datetime.fromtimestamp(0)
+
+        ds_split = r.addr2.split(None, 3)
+        if len(ds_split) != 4:
+            vdns.common.abort(f'Bad DS line: {r.addr2}')
+
+        # pylint: disable=unexpected-keyword-arg
+        dnssec = DNSSEC(domain=domain, hostname=r.addr1, keyid=int(ds_split[0]), ksk=True, algorithm=8,
+                        digest_sha1='', digest_sha256='', key_pub='', st_key_pub='', st_key_priv='',
+                        ts_created=now, ts_activate=now, ts_publish=now)
+        # pylint: enable=unexpected-keyword-arg
+        ds = cls.from_dnssec(dnssec)
+
+        if ds_split[1] != '8':
+            raise ParseError(f'Cannot handle protocol "{ds_split[1]}"', r)
+
+        if ds_split[2] == '1':
+            ds.digest_sha1 = ds_split[3]
+        elif ds_split[2] == '2':
+            ds.digest_sha256 = ds_split[3]
+        else:
+            raise ParseError(f'Cannot handle digest type "{ds_split[2]}"', r)
+
+        return ds
+
 
 @dc.dataclass(kw_only=True)
 class SSHFP(RR):
@@ -373,6 +505,14 @@ class SSHFP(RR):
     def _records(self) -> _StringRecord:
         data = f'{self.keytype} {self.hashtype} {self.fingerprint}'
         return _StringRecord(data)
+
+    @classmethod
+    def parse_line(cls: Type['SSHFP'], domain: str, r: ParseLineInput) -> 'SSHFP':
+        dt = r.addr2.split(None, 2)
+        # pylint: disable=unexpected-keyword-arg
+        return SSHFP(domain=domain, hostname=r.addr1, keytype=int(dt[0]), hashtype=int(dt[1]), fingerprint=dt[2],
+                     ttl=r.ttl)
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass(kw_only=True)
@@ -415,6 +555,77 @@ class DKIM(RR):
 
         return _StringRecord(st='', multiline_st=lines, rrname='TXT')
 
+    @classmethod
+    def _parse_dkim(cls, addr1: str, addr2: str) -> 'DKIM':
+        addr1_split = addr1.split('.', 2)
+        assert addr1_split[1] == '_domainkey'
+
+        if len(addr1_split) > 2:
+            hostname = addr1_split[2]
+        else:
+            hostname = None
+
+        selector = addr1_split[0]
+        k: str = ''
+        key_pub: str = ''
+        g: Optional[str] = None
+        t: bool = False
+        h: Optional[str] = None
+        subdomains: bool = False
+
+        if addr2[0] == '"' and addr2[-1] == '"':
+            addr2 = addr2[1:-1]
+
+        for entry in addr2.split(';'):
+            entry = entry.strip()
+            key, value = entry.split('=', 1)
+            if key == 'v':
+                assert value == 'DKIM1', f'Only DKIM1 is supported. Found: {value}'
+            elif key == 'g':
+                g = value
+            elif key == 'p':
+                key_pub = value
+            elif key == 'k':
+                k = value
+            elif key == 's':
+                pass
+            elif key == 't':
+                if value == 'y':
+                    subdomains = True
+                    t = True
+                elif value == 's:y':
+                    subdomains = False
+                    t = True
+                elif value == 's':
+                    t = False
+                elif value == '':
+                    pass
+                else:
+                    vdns.common.abort(f'Unhandled t value for DKIM record: "{addr2}"')
+            elif key == 'h':
+                h = value
+
+        assert k != ''
+        assert key_pub != ''
+
+        # Caller must set domain and ttl
+        # pylint: disable=unexpected-keyword-arg
+        return vdns.rr.DKIM(domain='', hostname=hostname, ttl=None,
+                            selector=selector, k=k, key_pub=key_pub, g=g, t=t, h=h, subdomains=subdomains)
+        # pylint: enable=unexpected-keyword-arg
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'DKIM':
+        # pylint: disable=unexpected-keyword-arg
+        if not r.addr1 or not (r.addr1.endswith('._domainkey') or '._domainkey.' in r.addr1):
+            raise ParseError('Not a DKIM host', r)
+
+        dkim = cls._parse_dkim(r.addr1, r.addr2)
+        dkim.domain = domain
+        dkim.ttl = r.ttl
+        return dkim
+        # pylint: enable=unexpected-keyword-arg
+
 
 @dc.dataclass(kw_only=True)
 class SRV(RR):
@@ -443,6 +654,38 @@ class SRV(RR):
         data = f'{self.priority} {self.weight} {self.port} {self.target}'
         needsdot = self.target.count('.') >= 1
         return _StringRecord(data, needsdot=needsdot)
+
+    @classmethod
+    def parse_line(cls, domain: str, r: ParseLineInput) -> 'SRV':
+        if not r.addr1 or len(t := r.addr1.split('.', 2)) <= 1 or not t[0].startswith('_') or not t[1].startswith('_'):
+            vdns.common.abort(f'Bad SRV hostname: {r.addr1}')
+
+        hostname = t[2] if len(t) == 3 else ''
+        service = t[0][1:]
+        protocol = t[1][1:]
+
+        if not r.addr2 or not len(t := r.addr2.split(None, 3)) == 4:
+            vdns.common.abort(f'Bad SRV record: {r.addr2}')
+
+        priority = int(t[0])
+        weight = int(t[1])
+        port = int(t[2])
+        target = t[3]
+
+        # pylint: disable=unexpected-keyword-arg
+        return SRV(
+            name=hostname,
+            hostname=None,
+            ttl=r.ttl,
+            service=service,
+            protocol=protocol,
+            domain=domain,
+            priority=priority,
+            weight=weight,
+            port=port,
+            target=target
+        )
+        # pylint: enable=unexpected-keyword-arg
 
 
 @dc.dataclass

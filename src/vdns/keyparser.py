@@ -1,139 +1,13 @@
 import os.path
 import re
-import base64
-import struct
-import hashlib
 import logging
 import datetime
-import dataclasses as dc
 
 import vdns.rr
 import vdns.common
 import vdns.parsing
 
 from typing import Optional
-
-
-@dc.dataclass
-class ParsedPubKeyLine:
-    zone: str
-    flags: int
-    protocol: int
-    algorithm: int
-    key_pub: str
-
-    keyid: int
-    sha1: str
-    sha256: str
-    ksk: bool
-
-    def str(self) -> str:
-        return (f'flags: {self.flags}, protocol: {self.protocol}, algorithm: {self.algorithm} -> '
-                f'keyid: {self.keyid}, ksk: {self.ksk}, sha1: {self.sha1}, sha256: {self.sha256}')
-
-
-@dc.dataclass
-class DSSigs:
-    sha1: str
-    sha256: str
-
-
-def calc_dnssec_keyid(flags: int, protocol: int, algorithm: int, st: str) -> int:
-    """
-    Calculate the keyid based on the key string
-    """
-
-    st2: bytes
-
-    st0 = st.replace(' ', '')
-    st2 = struct.pack('!HBB', flags, protocol, algorithm)
-    st2 += base64.b64decode(st0)
-
-    cnt = 0
-    for idx, ch in enumerate(st2):
-        # TODO: verify this. Looks like we don't need the struct.unpack in python3
-        # s = struct.unpack('B', ch)[0]
-        s = ch
-        if (idx % 2) == 0:
-            cnt += s << 8
-        else:
-            cnt += s
-
-    ret = ((cnt & 0xFFFF) + (cnt >> 16)) & 0xFFFF
-
-    return ret
-
-
-def calc_ds_sigs(owner: str, flags: int, protocol: int, algorithm: int, st: str) -> DSSigs:
-    """
-    Calculate the DS signatures
-
-    Return a dictionary where key is the algorithm and value is the value
-    """
-
-    st2: bytes
-
-    st0 = st.replace(' ', '')
-    st2 = struct.pack('!HBB', flags, protocol, algorithm)
-    st2 += base64.b64decode(st0)
-
-    # Transform owner from A.B.C to <legth of A>A<length of B>B<length of C>C0
-
-    if owner[-1] == '.':
-        owner2 = owner
-    else:
-        owner2 = owner + '.'
-
-    owner3 = b''
-    for i in owner2.split('.'):
-        owner3 += struct.pack('B', len(i)) + i.encode('ASCII')
-
-    st3: bytes = owner3 + st2
-
-    ret = DSSigs(
-        sha1=hashlib.sha1(st3).hexdigest().upper(),
-        sha256=hashlib.sha256(st3).hexdigest().upper(),
-    )
-
-    return ret
-
-
-def parse_pub_key_line(dt: vdns.parsing.ParsedLine) -> ParsedPubKeyLine:
-    """Further parses a DNSKEY line.
-
-    The returned zone is the exact name that's listed in the line, including a potential dot at the end.
-    """
-    if dt.addr1 is None:
-        vdns.common.abort(f'Entry is missing the hostname/domain: {dt}')
-
-    zone = dt.addr1
-    key0 = dt.addr2
-    keydata = key0.split(None, 3)
-    flags = int(keydata[0])
-    protocol = int(keydata[1])
-    algorithm = int(keydata[2])
-    key_pub = keydata[3]
-
-    if protocol != 3:
-        vdns.common.abort(f'Cannot handle protocol: {protocol}')
-
-    keyid = calc_dnssec_keyid(flags, protocol, algorithm, key_pub)
-    sigs = calc_ds_sigs(zone, flags, protocol, algorithm, key_pub)
-    ksk = ((flags & 0x03) == 0x01)
-
-    ret = ParsedPubKeyLine(
-        zone=dt.addr1,
-        flags=flags,
-        protocol=protocol,
-        algorithm=algorithm,
-        key_pub=key_pub,
-        keyid=keyid,
-        sha1=sigs.sha1,
-        sha256=sigs.sha256,
-        ksk=ksk,
-    )
-
-    return ret
 
 
 def parse_ts(st: str) -> datetime.datetime:
@@ -167,7 +41,7 @@ def parse_ts(st: str) -> datetime.datetime:
 def _parse(domain: str, st_pub: str, st_priv: str) -> Optional[vdns.rr.DNSSEC]:
     """Easier to test."""
     # Parse the public key
-    dt_pub: Optional[ParsedPubKeyLine] = None
+    dt_pub: Optional[vdns.parsing.ParsedPubKeyLine] = None
 
     buffer: list[str] = []
     in_parentheses = False
@@ -191,7 +65,7 @@ def _parse(domain: str, st_pub: str, st_priv: str) -> Optional[vdns.rr.DNSSEC]:
             vdns.common.abort(f'Found second DNSKEY: {line2}')
 
         logging.debug('Parsing: %s', line2)
-        dt_pub = parse_pub_key_line(parsed_line)
+        dt_pub = vdns.parsing.parse_pub_key_line(parsed_line)
         logging.debug(dt_pub.str())
 
     if not dt_pub:

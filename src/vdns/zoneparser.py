@@ -1,6 +1,5 @@
 import logging
 import datetime
-import ipaddress
 import dataclasses as dc
 
 from pprint import pprint
@@ -48,175 +47,44 @@ class ZoneParser:
         if fn is not None:
             self.read(fn, zone)
 
-    def _parse_dkim(self, addr1: str, addr2: str) -> vdns.rr.DKIM:
-        addr1_split = addr1.split('.', 2)
-        assert addr1_split[1] == '_domainkey'
-
-        if len(addr1_split) > 2:
-            hostname = addr1_split[2]
-        else:
-            hostname = None
-
-        selector = addr1_split[0]
-        k: str = ''
-        key_pub: str = ''
-        g: Optional[str] = None
-        t: bool = False
-        h: Optional[str] = None
-        subdomains: bool = False
-
-        if addr2[0] == '"' and addr2[-1] == '"':
-            addr2 = addr2[1:-1]
-
-        for entry in addr2.split(';'):
-            entry = entry.strip()
-            key, value = entry.split('=', 1)
-            if key == 'v':
-                assert value == 'DKIM1', f'Only DKIM1 is supported. Found: {value}'
-            elif key == 'g':
-                g = value
-            elif key == 'p':
-                key_pub = value
-            elif key == 'k':
-                k = value
-            elif key == 's':
-                pass
-            elif key == 't':
-                if value == 'y':
-                    subdomains = True
-                    t = True
-                elif value == 's:y':
-                    subdomains = False
-                    t = True
-                elif value == 's':
-                    t = False
-                elif value == '':
-                    pass
-                else:
-                    vdns.common.abort(f'Unhandled t value for DKIM record: "{addr2}"')
-            elif key == 'h':
-                h = value
-
-        assert k != ''
-        assert key_pub != ''
-
-        # Caller must set domain and ttl
-        # pylint: disable=unexpected-keyword-arg
-        return vdns.rr.DKIM(domain='', hostname=hostname, ttl=None,
-                            selector=selector, k=k, key_pub=key_pub, g=g, t=t, h=h, subdomains=subdomains)
-        # pylint: enable=unexpected-keyword-arg
-
-    def _parse_dnskey(self, addr: str) -> vdns.rr.DNSKEY:
-        now = datetime.datetime.now()
-
-        pl = vdns.parsing.ParsedLine(
-            addr1='something',
-            addr2=addr,
-            rr='DNSKEY',
-        )
-        r = vdns.keyparser.parse_pub_key_line(pl)
-
-        # Caller must set domain, hostname and ttl.
-        # pylint: disable=unexpected-keyword-arg
-        dnssec = vdns.rr.DNSSEC(
-            domain='',
-            hostname='',
-            ttl=None,
-            keyid=r.keyid,
-            ksk=r.ksk,
-            algorithm=r.algorithm,
-            digest_sha1=r.sha1,
-            digest_sha256=r.sha256,
-            key_pub=r.key_pub,
-            st_key_pub='',
-            st_key_priv='',
-            ts_created=now,
-            ts_activate=now,
-            ts_publish=now
-        )
-        # pylint: enable=unexpected-keyword-arg
-        return vdns.rr.DNSKEY.from_dnssec(dnssec)
-
     def add_entry(self, r: Entry, domain: str) -> None:
-        dnssec: vdns.rr.DNSSEC
-
-        # pylint: disable=unexpected-keyword-arg
         if r.rr == 'PTR':
             logging.info('Ignoring PTR: %r', r)
         elif r.rr in ('A', 'AAAA'):
-            self.dt.hosts.append(
-                vdns.rr.Host(domain=domain, hostname=r.addr1, ip=ipaddress.ip_address(r.addr2),
-                             ttl=r.ttl, reverse=False))
+            self.dt.hosts.append(vdns.rr.Host.parse_line(domain, r))
         elif r.rr == 'CNAME':
-            self.dt.cnames.append(vdns.rr.CNAME(domain=domain, hostname=r.addr1, hostname0=r.addr2, ttl=r.ttl))
+            self.dt.cnames.append(vdns.rr.CNAME.parse_line(domain, r))
         elif r.rr == 'SSHFP':
-            dt2 = r.addr2.split(None, 2)
-            self.dt.sshfp.append(vdns.rr.SSHFP(domain=domain, hostname=r.addr1, keytype=int(dt2[0]),
-                                               hashtype=int(dt2[1]), fingerprint=dt2[2], ttl=r.ttl))
+            self.dt.sshfp.append(vdns.rr.SSHFP.parse_line(domain, r))
         elif r.rr == 'NS':
-            self.dt.ns.append(vdns.rr.NS(domain=domain, hostname=r.addr1, ns=r.addr2, ttl=r.ttl))
+            self.dt.ns.append(vdns.rr.NS.parse_line(domain, r))
         elif r.rr == 'TXT':
-            if r.addr1 and (r.addr1.endswith('._domainkey') or '._domainkey.' in r.addr1):
-                dkim = self._parse_dkim(r.addr1, r.addr2)
-                dkim.domain = domain
-                dkim.ttl = r.ttl
+            try:
+                dkim = vdns.rr.DKIM.parse_line(domain, r)
                 self.dt.dkim.append(dkim)
-            else:
-                txt = r.addr2
-                if txt[0] == '"' and txt[-1] == '"':
-                    txt = txt[1:-1]
-                self.dt.txt.append(vdns.rr.TXT(domain=domain, hostname=r.addr1, txt=txt, ttl=r.ttl))
+            except vdns.rr.ParseError:
+                txt = vdns.rr.TXT.parse_line(domain, r)
+                self.dt.txt.append(txt)
         elif r.rr == 'MX':
-            dt2 = r.addr2.split(None, 1)
-            self.dt.mx.append(
-                vdns.rr.MX(domain=domain, hostname=r.addr1, priority=int(dt2[0]), mx=dt2[1], ttl=r.ttl))
+            self.dt.mx.append(vdns.rr.MX.parse_line(domain, r))
         elif r.rr == 'DNSKEY':
-            if r.addr1:
-                vdns.common.abort(f'Found DNSKEY record with non-empty hostname: {r}')
-            dnssec = self._parse_dnskey(r.addr2)
-            dnssec.hostname = r.addr1
-            dnssec.domain = domain
-            dnssec.ttl = r.ttl
-            self.dt.dnssec.append(dnssec)
+            self.dt.dnssec.append(vdns.rr.DNSKEY.parse_line(domain, r))
         elif r.rr == 'DS':
-            if not r.addr1:
-                vdns.common.abort(f'Found DS record without a hostname: {r}')
-            now = datetime.datetime.now()
-
-            ds: Optional[vdns.rr.DNSSEC] = None
-
-            ds_split = r.addr2.split(None, 3)
-            if len(ds_split) != 4:
-                vdns.common.abort(f'Bad DS line: {r.addr2}')
-
-            # Try to find an existing entry first, because DS records have two entries
-            for ds in self.dt.ds:
-                if ds.keyid == int(ds_split[0]):
-                    # These should match
-                    if ds.domain != domain or ds.hostname != r.addr1:
-                        vdns.common.abort(
-                            f'Strange line: {r.addr2}: {ds.domain} != {domain} OR {ds.hostname} != {r.addr1}')
+            ds = vdns.rr.DS.parse_line(domain, r)
+            # Try to find an existing entry because DS records have two entries
+            dsold: Optional[vdns.rr.DNSSEC] = None
+            for dsold in self.dt.ds:
+                if ds.keyid == dsold.keyid:
                     break
-
-            if not ds or ds.keyid != int(ds_split[0]):
-                dnssec = vdns.rr.DNSSEC(domain=domain, hostname=r.addr1, keyid=int(ds_split[0]), ksk=True, algorithm=8,
-                                        digest_sha1='', digest_sha256='', key_pub='', st_key_pub='', st_key_priv='',
-                                        ts_created=now, ts_activate=now, ts_publish=now)
-                ds = vdns.rr.DS.from_dnssec(dnssec)
-                self.dt.ds.append(ds)
-
-            if ds_split[1] != '8':
-                vdns.common.abort(f'Cannot handle protocol "{ds_split[1]}"')
-
-            if ds_split[2] == '1':
-                ds.digest_sha1 = ds_split[3]
-            elif ds_split[2] == '2':
-                ds.digest_sha256 = ds_split[3]
+            if dsold and ds.keyid == dsold.keyid:
+                dsold.digest_sha1 = ds.digest_sha1 or dsold.digest_sha1
+                dsold.digest_sha256 = ds.digest_sha256 or dsold.digest_sha256
             else:
-                vdns.common.abort(f'Cannot handle digest type "{ds_split[2]}"')
+                self.dt.ds.append(ds)
+        elif r.rr == 'SRV':
+            self.dt.srv.append(vdns.rr.SRV.parse_line(domain, r))
         else:
             logging.info('Unhandled %s: %r', r.rr, r)
-        # pylint: enable=unexpected-keyword-arg
 
     def _read_file(self, fn: str) -> Optional[list[str]]:
         """Reads the contents of a file, to be mocked in tests."""

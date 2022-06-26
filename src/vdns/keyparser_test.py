@@ -5,7 +5,6 @@ import parameterized
 
 import vdns.rr
 import vdns.common
-import vdns.parsing
 from vdns import keyparser
 
 from typing import Iterable
@@ -24,30 +23,6 @@ class KeyparserTest(unittest.TestCase):
             if k in ignored:
                 continue
             self.assertEqual(getattr(result, k), getattr(expected, k), f'{k} differs')
-
-    def test_parse_pub_key_line(self) -> None:
-        # ; This is a zone-signing key, keyid 18688, for example.com.
-        # ; Created: 20220619004748 (Sun Jun 19 01:47:48 2022)
-        # ; Publish: 20220619004748 (Sun Jun 19 01:47:48 2022)
-        # ; Activate: 20220619004748 (Sun Jun 19 01:47:48 2022)
-        st = textwrap.dedent('''
-        example.com. IN DNSKEY 256 3 8 ( AwEAAakscd0AGk+m8PuYVe6yVzpugNCAkaqNA/R+VnoLnUYRRMrDnP5J
-                                         /MgbOUC+7X/zSX0iY9MKzlSKVg5qIh9D/P3NpDAzC7V4Oceurdr98nYj
-                                         S/YQj8THgyBsmSjoJ232eeeYIS4P/uIFTDz7HAmsSUPCoiewr4X7e085
-                                         LaAwHitgBQZ2uNXDs19SCeXnycz7SGeWMJyK3RwUIXUDkTekB+3F2mAU
-                                         l5lviz2VUr12rQHtuId31+Z0T/X+tf6/G3mISyZQ99GOss/niSlLp8uX
-                                         oeCbwX52IOeUK+ZYD1A9PXF3F2sCvT/EoU+M/c+7stYAjKhNKo7qqWgV
-                                         VOuRnsR0+FM=0 )
-        ''')
-        dt = vdns.parsing.parse_line(st)
-        assert dt is not None  # Should never happen with a valid st
-        res = keyparser.parse_pub_key_line(dt)
-        self.assertEqual(res.zone, 'example.com.')
-        self.assertEqual(res.flags, 256)
-        self.assertEqual(res.keyid, 18688)
-        self.assertEqual(res.ksk, False)
-        self.assertEqual(res.sha1, 'C6931D9DA68E25BF01144904184B9D5D28D7E5C4')
-        self.assertEqual(res.sha256, '47A3D29C73C2791D6FCD8DEFC908FA0759CDBA6039784BCAC438D2687E8EDD2E')
 
     def test_parse_ts(self) -> None:
         st = '20220102102030'

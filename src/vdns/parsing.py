@@ -5,13 +5,11 @@ import dataclasses as dc
 
 from typing import Iterable, Optional
 
-import vdns.rr
-import vdns.src.src0
-import vdns.zone0
 import vdns.common
+import vdns.dnssec
 
 # List if known RRs. We only need to list those that we handle.
-RRS = ['A', 'AAAA', 'NS', 'CNAME', 'DKIM', 'DS', 'MX', 'SSHFP', 'TXT', 'SOA', 'DNSKEY', 'PTR']
+RRS = ['A', 'AAAA', 'NS', 'CNAME', 'DKIM', 'DNSKEY', 'DS', 'MX', 'PTR', 'SSHFP', 'TXT', 'SOA', 'SRV']
 
 
 @dc.dataclass
@@ -20,6 +18,24 @@ class ParsedLine:
     ttl: Optional[str] = None  # As read. E.g., 1D, 2W
     rr: str = ''
     addr2: str = ''
+
+
+@dc.dataclass
+class ParsedPubKeyLine:
+    zone: str
+    flags: int
+    protocol: int
+    algorithm: int
+    key_pub: str
+
+    keyid: int
+    sha1: str
+    sha256: str
+    ksk: bool
+
+    def str(self) -> str:
+        return (f'flags: {self.flags}, protocol: {self.protocol}, algorithm: {self.algorithm} -> '
+                f'keyid: {self.keyid}, ksk: {self.ksk}, sha1: {self.sha1}, sha256: {self.sha256}')
 
 
 def is_ttl(st: str) -> bool:
@@ -165,7 +181,7 @@ def parse_line(line0: str) -> Optional[ParsedLine]:
     """Parses a line. Line can actually be multiple lines."""
     line = cleanup_line(line0)
 
-    if len(line) == 0 or line[0] == ';':
+    if not line:
         return None
 
     ret = ParsedLine()
@@ -204,5 +220,43 @@ def parse_line(line0: str) -> Optional[ParsedLine]:
         else:
             logging.warning('Could not parse line: %s ', line)
             return None
+
+    return ret
+
+
+def parse_pub_key_line(dt: ParsedLine) -> ParsedPubKeyLine:
+    """Further parses a DNSKEY line.
+
+    The returned zone is the exact name that's listed in the line, including a potential dot at the end.
+    """
+    if dt.addr1 is None:
+        vdns.common.abort(f'Entry is missing the hostname/domain: {dt}')
+
+    zone = dt.addr1
+    key0 = dt.addr2
+    keydata = key0.split(None, 3)
+    flags = int(keydata[0])
+    protocol = int(keydata[1])
+    algorithm = int(keydata[2])
+    key_pub = keydata[3]
+
+    if protocol != 3:
+        vdns.common.abort(f'Cannot handle protocol: {protocol}')
+
+    keyid = vdns.dnssec.calc_dnssec_keyid(flags, protocol, algorithm, key_pub)
+    sigs = vdns.dnssec.calc_ds_sigs(zone, flags, protocol, algorithm, key_pub)
+    ksk = ((flags & 0x03) == 0x01)
+
+    ret = ParsedPubKeyLine(
+        zone=dt.addr1,
+        flags=flags,
+        protocol=protocol,
+        algorithm=algorithm,
+        key_pub=key_pub,
+        keyid=keyid,
+        sha1=sigs.sha1,
+        sha256=sigs.sha256,
+        ksk=ksk,
+    )
 
     return ret
