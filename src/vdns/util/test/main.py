@@ -50,7 +50,6 @@ class TestSource(vdns.src.src0.Source):
                 fqdn = f'{entry.hostname}.{entry.domain}'
                 if fqdn != self.domain:
                     continue
-                # t = copy.deepcopy(vdns.rr.DNSKEY.from_dnssec(entry))
                 t = copy.deepcopy(entry)
                 t.domain = self.domain
                 t.hostname = ''
