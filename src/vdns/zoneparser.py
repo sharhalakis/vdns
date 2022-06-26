@@ -21,105 +21,28 @@ db = None
 @dc.dataclass
 class Entry:
     addr1: Optional[str] = ''
-    ttl: Optional[int] = None
+    ttl: Optional[datetime.timedelta] = None
     rr: str = ''
     addr2: str = ''
 
 
 @dc.dataclass
-class Data:
-
-    @dc.dataclass
-    class SOA:
-        name: str = ''
-        contact: str = ''
-        serial: int = 0
-        ttl: int = 0
-        refresh: int = 0
-        retry: int = 0
-        expire: int = 0
-        minimum: int = 0
-        ns0: str = ''
-        reverse: bool = False
-
-        def to_soa_rr(self) -> vdns.rr.SOA:
-            return vdns.rr.SOA(
-                name=self.name,
-                ttl=datetime.timedelta(seconds=self.ttl),
-                refresh=datetime.timedelta(seconds=self.refresh),
-                retry=datetime.timedelta(seconds=self.retry),
-                expire=datetime.timedelta(seconds=self.expire),
-                minimum=datetime.timedelta(seconds=self.minimum),
-                contact=self.contact,
-                serial=self.serial,
-                ns0=self.ns0,
-            )
-
-    domain: str = ''
-    soa: SOA = dc.field(default_factory=SOA)
-    hosts: list[vdns.rr.Host] = dc.field(default_factory=list)
-    cnames: list[vdns.rr.CNAME] = dc.field(default_factory=list)
-    ns: list[vdns.rr.NS] = dc.field(default_factory=list)
-    txt: list[vdns.rr.TXT] = dc.field(default_factory=list)
-    mx: list[vdns.rr.MX] = dc.field(default_factory=list)
-    sshfp: list[vdns.rr.SSHFP] = dc.field(default_factory=list)
-    dkim: list[vdns.rr.DKIM] = dc.field(default_factory=list)
-    dnssec: list[vdns.rr.DNSSEC] = dc.field(default_factory=list)
-    defttl: int = 0
-
-    def to_zonedata(self) -> vdns.zone0.ZoneData:
-        assert not self.soa.reverse
-
-        domain = self.domain
-
-        ret = vdns.zone0.ZoneData()
-        ret.soa = self.soa.to_soa_rr()
-
-        dd = vdns.src.src0.DomainData(name=self.domain, serial=self.soa.serial)
-        dd.hosts = self.hosts
-        dd.cnames = self.cnames
-        dd.ns = self.ns
-        dd.txt = self.txt
-        dd.mx = self.mx
-        dd.sshfp = self.sshfp
-        dd.dkim = self.dkim
-        dd.dnssec = [vdns.rr.DNSKEY.from_dnssec(x) for x in self.dnssec]
-        dd.soa = ret.soa
-        ret.data = dd
-
-        subs: set[str] = set()
-
-        for ns in self.ns:
-            if not ns.hostname:
-                continue
-            subdomain = f'{ns.hostname}.{domain}'
-            subs.add(subdomain)
-            ret.subs.setdefault(subdomain, vdns.zone0.ZoneData.SubdomainData(subdomain)).ns.append(ns)
-
-        for ds in self.dnssec:
-            if not ds.hostname:
-                continue
-            subdomain = f'{ds.hostname}.{domain}'
-            subs.add(subdomain)
-            entry = vdns.rr.DS.from_dnssec(ds)
-            ret.subs.setdefault(subdomain, vdns.zone0.ZoneData.SubdomainData(subdomain)).ds.append(entry)
-
-        for sub in subs:
-            dd.subdomains.append(sub)
-
-        return ret
+class ParsedDomainData(vdns.src.src0.DomainData):
+    """Holds the extra data that parsing produces.
+    It produces more data than DomainData can hold, like DS records.
+    """
+    ds: list[vdns.rr.DS] = dc.field(default_factory=list)
 
 
 class ZoneParser:
     """
     A class to read and parse a zone file
     """
-    # dt: dict[str, Any]
-    dt: Data
+    dt: ParsedDomainData
     is_reverse: bool
 
     def __init__(self, fn: Optional[str] = None, zone: Optional[str] = None, is_reverse: bool = False) -> None:
-        self.dt = Data()
+        self.dt = ParsedDomainData()
         self.is_reverse = is_reverse
 
         if fn is not None:
@@ -183,7 +106,7 @@ class ZoneParser:
                             selector=selector, k=k, key_pub=key_pub, g=g, t=t, h=h, subdomains=subdomains)
         # pylint: enable=unexpected-keyword-arg
 
-    def _parse_dnskey(self, addr: str) -> vdns.rr.DNSSEC:
+    def _parse_dnskey(self, addr: str) -> vdns.rr.DNSKEY:
         now = datetime.datetime.now()
 
         pl = vdns.parsing.ParsedLine(
@@ -195,7 +118,7 @@ class ZoneParser:
 
         # Caller must set domain, hostname and ttl.
         # pylint: disable=unexpected-keyword-arg
-        return vdns.rr.DNSSEC(
+        dnssec = vdns.rr.DNSSEC(
             domain='',
             hostname='',
             ttl=None,
@@ -212,12 +135,10 @@ class ZoneParser:
             ts_publish=now
         )
         # pylint: enable=unexpected-keyword-arg
+        return vdns.rr.DNSKEY.from_dnssec(dnssec)
 
     def add_entry(self, r: Entry, domain: str) -> None:
-        def t(ttl: Optional[int]) -> Optional[datetime.timedelta]:
-            if ttl is None:
-                return None
-            return datetime.timedelta(seconds=ttl)
+        dnssec: vdns.rr.DNSSEC
 
         # pylint: disable=unexpected-keyword-arg
         if r.rr == 'PTR':
@@ -225,51 +146,51 @@ class ZoneParser:
         elif r.rr in ('A', 'AAAA'):
             self.dt.hosts.append(
                 vdns.rr.Host(domain=domain, hostname=r.addr1, ip=ipaddress.ip_address(r.addr2),
-                             ttl=t(r.ttl), reverse=False))
+                             ttl=r.ttl, reverse=False))
         elif r.rr == 'CNAME':
-            self.dt.cnames.append(vdns.rr.CNAME(domain=domain, hostname=r.addr1, hostname0=r.addr2, ttl=t(r.ttl)))
+            self.dt.cnames.append(vdns.rr.CNAME(domain=domain, hostname=r.addr1, hostname0=r.addr2, ttl=r.ttl))
         elif r.rr == 'SSHFP':
             dt2 = r.addr2.split(None, 2)
             self.dt.sshfp.append(vdns.rr.SSHFP(domain=domain, hostname=r.addr1, keytype=int(dt2[0]),
-                                               hashtype=int(dt2[1]), fingerprint=dt2[2], ttl=t(r.ttl)))
+                                               hashtype=int(dt2[1]), fingerprint=dt2[2], ttl=r.ttl))
         elif r.rr == 'NS':
-            self.dt.ns.append(vdns.rr.NS(domain=domain, hostname=r.addr1, ns=r.addr2, ttl=t(r.ttl)))
+            self.dt.ns.append(vdns.rr.NS(domain=domain, hostname=r.addr1, ns=r.addr2, ttl=r.ttl))
         elif r.rr == 'TXT':
             if r.addr1 and (r.addr1.endswith('._domainkey') or '._domainkey.' in r.addr1):
                 dkim = self._parse_dkim(r.addr1, r.addr2)
                 dkim.domain = domain
-                dkim.ttl = t(r.ttl)
+                dkim.ttl = r.ttl
                 self.dt.dkim.append(dkim)
             else:
                 txt = r.addr2
                 if txt[0] == '"' and txt[-1] == '"':
                     txt = txt[1:-1]
-                self.dt.txt.append(vdns.rr.TXT(domain=domain, hostname=r.addr1, txt=txt, ttl=t(r.ttl)))
+                self.dt.txt.append(vdns.rr.TXT(domain=domain, hostname=r.addr1, txt=txt, ttl=r.ttl))
         elif r.rr == 'MX':
             dt2 = r.addr2.split(None, 1)
             self.dt.mx.append(
-                vdns.rr.MX(domain=domain, hostname=r.addr1, priority=int(dt2[0]), mx=dt2[1], ttl=t(r.ttl)))
+                vdns.rr.MX(domain=domain, hostname=r.addr1, priority=int(dt2[0]), mx=dt2[1], ttl=r.ttl))
         elif r.rr == 'DNSKEY':
             if r.addr1:
                 vdns.common.abort(f'Found DNSKEY record with non-empty hostname: {r}')
             dnssec = self._parse_dnskey(r.addr2)
             dnssec.hostname = r.addr1
             dnssec.domain = domain
-            dnssec.ttl = t(r.ttl)
+            dnssec.ttl = r.ttl
             self.dt.dnssec.append(dnssec)
         elif r.rr == 'DS':
             if not r.addr1:
                 vdns.common.abort(f'Found DS record without a hostname: {r}')
             now = datetime.datetime.now()
 
-            ds: Optional[vdns.rr.DNSSEC]
+            ds: Optional[vdns.rr.DNSSEC] = None
 
             ds_split = r.addr2.split(None, 3)
             if len(ds_split) != 4:
                 vdns.common.abort(f'Bad DS line: {r.addr2}')
 
             # Try to find an existing entry first, because DS records have two entries
-            for ds in self.dt.dnssec:
+            for ds in self.dt.ds:
                 if ds.keyid == int(ds_split[0]):
                     # These should match
                     if ds.domain != domain or ds.hostname != r.addr1:
@@ -277,11 +198,12 @@ class ZoneParser:
                             f'Strange line: {r.addr2}: {ds.domain} != {domain} OR {ds.hostname} != {r.addr1}')
                     break
 
-            if ds.keyid != int(ds_split[0]):
-                ds = vdns.rr.DNSSEC(domain=domain, hostname=r.addr1, keyid=int(ds_split[0]), ksk=True, algorithm=8,
-                                    digest_sha1='', digest_sha256='', key_pub='', st_key_pub='', st_key_priv='',
-                                    ts_created=now, ts_activate=now, ts_publish=now)
-                self.dt.dnssec.append(ds)
+            if not ds or ds.keyid != int(ds_split[0]):
+                dnssec = vdns.rr.DNSSEC(domain=domain, hostname=r.addr1, keyid=int(ds_split[0]), ksk=True, algorithm=8,
+                                        digest_sha1='', digest_sha256='', key_pub='', st_key_pub='', st_key_priv='',
+                                        ts_created=now, ts_activate=now, ts_publish=now)
+                ds = vdns.rr.DS.from_dnssec(dnssec)
+                self.dt.ds.append(ds)
 
             if ds_split[1] != '8':
                 vdns.common.abort(f'Cannot handle protocol "{ds_split[1]}"')
@@ -330,10 +252,10 @@ class ZoneParser:
             domain = zone.strip('.')
             # soa['name'] = domain
 
-        self.dt = Data()
+        self.dt = ParsedDomainData()
 
-        defttl: int = -1
-        soattl: Optional[int] = None
+        defttl: datetime.timedelta = datetime.timedelta()
+        soattl: Optional[datetime.timedelta] = None
 
         r: Optional[vdns.parsing.ParsedLine]
 
@@ -345,7 +267,6 @@ class ZoneParser:
             if line.startswith('$TTL'):
                 t = line.split()
                 defttl = vdns.parsing.parse_ttl(t[1])
-                self.dt.defttl = defttl
                 continue
             if line.startswith('$ORIGIN'):
                 t = line.split()
@@ -409,8 +330,8 @@ class ZoneParser:
 
                 t = r.addr2.split()
 
-                self.dt.domain = domain
-                self.dt.soa = Data.SOA(
+                self.dt.name = domain
+                self.dt.soa = vdns.rr.SOA(
                     name=domain,
                     contact=t[1].removesuffix('.'),
                     serial=int(t[2]),
@@ -420,7 +341,6 @@ class ZoneParser:
                     expire=vdns.parsing.parse_ttl(t[5]),
                     minimum=vdns.parsing.parse_ttl(t[6]),
                     ns0=t[0].removesuffix('.'),
-                    reverse=False,
                 )
 
                 continue
@@ -436,7 +356,7 @@ class ZoneParser:
 
             # r2 = [lastname] + list(r[1:])
             entry = Entry(addr1=lastname, rr=r.rr, addr2=r.addr2)
-            entryttl: Optional[int] = None
+            entryttl: Optional[datetime.timedelta] = None
             if r.ttl:
                 entryttl = vdns.parsing.parse_ttl(r.ttl)
 
@@ -474,7 +394,7 @@ class ZoneParser:
         """
         pprint(self.dt)
 
-    def data(self) -> Data:
+    def data(self) -> ParsedDomainData:
         """
         Return the data dictionary
         """

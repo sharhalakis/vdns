@@ -29,6 +29,7 @@ class FuncTest(unittest.TestCase):
         ('1w', True),
         ('10.in-addr.arpa', False),
         ('20.', False),
+        ('3._domainkey', False),
     ])
     def test_is_ttl(self, st: str, res: bool) -> None:
         self.assertEqual(parsing.is_ttl(st), res)
@@ -97,7 +98,7 @@ class FuncTest(unittest.TestCase):
         ('2W', 86400 * 14),
     ])
     def test_parse_ttl(self, st: str, seconds: int) -> None:
-        self.assertEqual(parsing.parse_ttl(st), seconds)
+        self.assertEqual(parsing.parse_ttl(st), datetime.timedelta(seconds=seconds))
 
     @parameterized.parameterized.expand([
         ('''\

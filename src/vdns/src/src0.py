@@ -24,12 +24,11 @@ class DomainData:
     hosts: list[vdns.rr.Host] = dc.field(default_factory=list)
     cnames: list[vdns.rr.CNAME] = dc.field(default_factory=list)
     txt: list[vdns.rr.TXT] = dc.field(default_factory=list)
-    dnssec: list[vdns.rr.DNSKEY] = dc.field(default_factory=list)
+    dnssec: list[vdns.rr.DNSSEC] = dc.field(default_factory=list)
     sshfp: list[vdns.rr.SSHFP] = dc.field(default_factory=list)
     dkim: list[vdns.rr.DKIM] = dc.field(default_factory=list)
     srv: list[vdns.rr.SRV] = dc.field(default_factory=list)
     subdomains: list[str] = dc.field(default_factory=list)
-    # subdomains: list[vdns.rr.SOA] = dc.field(default_factory=list)
 
     def __iadd__(self, other: 'DomainData') -> 'DomainData':
         self.mx += other.mx

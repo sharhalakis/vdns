@@ -35,7 +35,7 @@ def handle_args(args: argparse.Namespace) -> None:
     config.domain = args.domain
     config.keyfile = args.keyfile
     if args.ttl:
-        config.ttl = datetime.timedelta(seconds=vdns.parsing.parse_ttl(args.ttl.upper()))
+        config.ttl = vdns.parsing.parse_ttl(args.ttl.upper())
 
     vdns.db.handle_args(args)
 

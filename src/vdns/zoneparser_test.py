@@ -4,20 +4,16 @@ import unittest
 import parameterized
 
 import vdns.rr
-import vdns.common
+import vdns.src.src0
 from vdns import zoneparser
 
-from typing import Optional, Union
+from typing import Union
 from unittest import mock
 
 ZoneParser = zoneparser.ZoneParser
-Data = zoneparser.Data
-SOA = zoneparser.Data.SOA
 
 
-def td(seconds: Optional[int]) -> Optional[datetime.timedelta]:
-    if seconds is None:
-        return None
+def td(seconds: int) -> datetime.timedelta:
     return datetime.timedelta(seconds=seconds)
 
 
@@ -76,19 +72,18 @@ www                     IN      CNAME   host1
 ldap             1M     IN      CNAME   host2.v13.gr.
 ''',
          False,
-         Data(
-             domain='v13.gr',
-             defttl=86400,
-             soa=SOA(
+         vdns.src.src0.DomainData(
+             name='v13.gr',
+             soa=vdns.rr.SOA(
                  name='v13.gr',
-                 ttl=86400,
+                 ttl=td(86400),
                  contact='v13.v13.gr',
                  ns0='ns1.example.com',
                  serial=2021010302,
-                 refresh=86400,
-                 retry=3600,
-                 expire=90 * 86400,
-                 minimum=60,
+                 refresh=td(86400),
+                 retry=td(3600),
+                 expire=td(90 * 86400),
+                 minimum=td(60),
              ),
              # pylint: disable=unexpected-keyword-arg
              hosts=[
@@ -131,16 +126,16 @@ ldap             1M     IN      CNAME   host2.v13.gr.
                  vdns.rr.SSHFP(domain='v13.gr', hostname='host3',
                                hashtype=1, keytype=2, fingerprint='01234567890abcdef1234567890abcdef1234567'),
              ],
+             # pylint: enable=unexpected-keyword-arg
          )),
     ])
-    def test_add_entry(self, contents: str, is_reverse: bool, res: Data) -> None:
+    def test_add_entry(self, contents: str, is_reverse: bool, res: vdns.src.src0.DomainData) -> None:
         with mock.patch.object(ZoneParser, '_read_file', return_value=contents.splitlines()):
             zp = ZoneParser(fn='somefile', is_reverse=is_reverse)
         dt = zp.data()
         print(dt)
         self.maxDiff = 8192
         self.assertEqual(dt.soa, res.soa)
-        self.assertEqual(dt.defttl, res.defttl)
         self.assertCountEqual(dt.hosts, res.hosts)
         self.assertCountEqual(dt.cnames, res.cnames)
         self.assertCountEqual(dt.ns, res.ns)

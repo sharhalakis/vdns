@@ -1,5 +1,5 @@
 # Common parsing functions
-
+import datetime
 import logging
 import dataclasses as dc
 
@@ -24,9 +24,8 @@ class ParsedLine:
 
 def is_ttl(st: str) -> bool:
     return (bool(st)
-            and st[0] in ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0')
-            and st[-1] != '.'
-            and 'arpa' not in st)
+            and st[0] in '1234567890'
+            and '.' not in st)
 
 
 def cleanup_line(line0: str) -> str:
@@ -136,7 +135,7 @@ def merge_multiline(lines0: Iterable[str], merge_quotes: bool) -> str:
     return ret
 
 
-def parse_ttl(st: str) -> int:
+def parse_ttl(st: str) -> datetime.timedelta:
     """
     Parse ttl and return the duration in seconds
     """
@@ -147,19 +146,19 @@ def parse_ttl(st: str) -> int:
         'W': 86400 * 7,
     }
 
+    seconds = 0
+
     # If this is already a number
-    if isinstance(st, int):
-        ret = st
-    elif st[-1].isdigit():
-        ret = int(st)
+    if st[-1].isdigit():
+        seconds = int(st)
     elif st[-1].upper() in deltas:
-        ret = int(st[:-1])
+        seconds = int(st[:-1])
         w = st[-1].upper()
-        ret *= deltas[w]
+        seconds *= deltas[w]
     else:
         vdns.common.abort(f'Cannot parse ttl "{st}"')
 
-    return ret
+    return datetime.timedelta(seconds=seconds)
 
 
 def parse_line(line0: str) -> Optional[ParsedLine]:

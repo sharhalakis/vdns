@@ -46,7 +46,7 @@ class Dynamic(vdns.src.src0.Source):
 
         return res
 
-    def read_zone_file(self) -> vdns.zoneparser.Data:
+    def read_zone_file(self) -> vdns.src.src0.DomainData:
         """
         Read the contents of a zone file and return them in a processed
         form as returned by ZoneInfo.data()

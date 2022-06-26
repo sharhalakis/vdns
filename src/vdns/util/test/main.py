@@ -1,26 +1,96 @@
+import copy
 import difflib
 
+import vdns.rr
 import vdns.src.src0
 import vdns.util.config
 import vdns.zone
+import vdns.zone0
 import vdns.common
 import vdns.zonemaker
 import vdns.zoneparser
 
-from typing import Optional
+from typing import Optional, TypeVar
+
+T = TypeVar('T', bound=vdns.rr.RR)
 
 
 class TestSource(vdns.src.src0.Source):
 
-    _dt: vdns.src.src0.DomainData
+    _dt: vdns.zoneparser.ParsedDomainData
 
-    def __init__(self, data: vdns.src.src0.DomainData):
+    def __init__(self, domain: str, data: vdns.zoneparser.ParsedDomainData):
         self._dt = data
-        super().__init__(self._dt.name)
+        super().__init__(domain)
 
     def get_data(self) -> Optional[vdns.src.src0.DomainData]:
-        # print(f"{self.domain}:", self._dt.dnssec)
-        return self._dt
+        def flt(entries: list[T]) -> list[T]:
+            return [x for x in entries if x.domain == self.domain]
+
+        def flt_sub(entries: list[T]) -> list[T]:
+            ret: list[T] = []
+            for entry in entries:
+                fqdn = f'{entry.hostname}.{entry.domain}'
+                if not fqdn.endswith(self.domain):
+                    continue
+                if fqdn == self.domain:
+                    hostname = ''
+                else:
+                    hostname = fqdn.removesuffix(f'.{self.domain}')
+
+                entry2 = copy.deepcopy(entry)
+                entry2.hostname = hostname
+                entry2.domain = self.domain
+                ret.append(entry2)
+            return ret
+
+        def mk_dnssec_from_ds(entries: list[vdns.rr.DS]) -> list[vdns.rr.DNSSEC]:
+            ret: list[vdns.rr.DNSSEC] = []
+            for entry in entries:
+                fqdn = f'{entry.hostname}.{entry.domain}'
+                if fqdn != self.domain:
+                    continue
+                # t = copy.deepcopy(vdns.rr.DNSKEY.from_dnssec(entry))
+                t = copy.deepcopy(entry)
+                t.domain = self.domain
+                t.hostname = ''
+                ret.append(t)
+            return ret
+
+        def get_subdomains(entries: list[T]) -> set[str]:
+            ret: set[str] = set()
+            for entry in entries:
+                if not entry.hostname or entry.domain != self.domain:
+                    continue
+                fqdn = f'{entry.hostname}.{entry.domain}'
+                ret.add(fqdn)
+            return ret
+
+        dt: vdns.zoneparser.ParsedDomainData = self._dt
+
+        soa = copy.deepcopy(dt.soa)
+        soa.name = self.domain
+
+        # Determine subdomains
+        subs: set[str] = get_subdomains(dt.ns) | get_subdomains(dt.ds)
+
+        ret = vdns.src.src0.DomainData(
+            name=self.domain,
+            serial=dt.serial,
+            soa=soa,
+            mx=flt(dt.mx),
+            ns=flt(dt.ns) + flt_sub(dt.ns),
+            hosts=flt(dt.hosts),
+            cnames=flt(dt.cnames),
+            txt=flt(dt.txt),
+            dnssec=flt(dt.dnssec) + mk_dnssec_from_ds(dt.ds),
+            sshfp=flt(dt.sshfp),
+            dkim=flt(dt.dkim),
+            srv=flt(dt.srv),
+            subdomains=list(subs),
+        )
+
+        return ret
 
     def has_changed(self) -> bool:
         return False
@@ -34,27 +104,17 @@ class TestSource(vdns.src.src0.Source):
 
 class TestZoneMaker(vdns.zonemaker.ZoneMaker):
 
-    _dt: vdns.src.src0.DomainData
+    _dt: vdns.zoneparser.ParsedDomainData
 
-    def __init__(self, data: vdns.src.src0.DomainData) -> None:
+    def __init__(self, domain: str, data: vdns.zoneparser.ParsedDomainData) -> None:
         self._dt = data
-        super().__init__(data.soa.name)
+        super().__init__(domain)
 
     def _mksources(self) -> vdns.zonemaker.SourceList:
-        return [TestSource(self._dt)]
+        return [TestSource(self.domain, self._dt)]
 
     def _zonemaker_factory(self, domain: str) -> vdns.zonemaker.ZoneMaker:
-        # Construct a fake SOA for subdomains
-        data = vdns.src.src0.DomainData(name=domain, soa=vdns.rr.SOA(name=domain))
-        subname = domain.removesuffix(f'.{self._dt.soa.name}')
-
-        # Add NS records for matching subdomains
-        data.ns.extend([ns for ns in self._dt.ns if ns.hostname == subname])
-
-        # Add DS records for matching subdomains
-        data.dnssec.extend([ds for ds in self._dt.dnssec if ds.hostname == subname])
-
-        return TestZoneMaker(data)
+        return TestZoneMaker(domain, self._dt)
 
 
 def doit() -> int:
@@ -63,7 +123,7 @@ def doit() -> int:
     def check_diff(a: str, b: str, msg: str) -> bool:
         delta = difflib.unified_diff(a.splitlines(), b.splitlines())
         diff = list(delta)
-        if diff:
+        if config.diff and diff:
             print(f'{msg}:')
             print('\n'.join(diff))
             return True
@@ -75,8 +135,7 @@ def doit() -> int:
     zp = vdns.zoneparser.ZoneParser()
     zp.parse(orig.splitlines())
     zp_data = zp.data()
-    dt = zp_data.to_zonedata()
-    zm = TestZoneMaker(dt.data)
+    zm = TestZoneMaker(zp_data.soa.name, zp_data)
     zm_out = zm.doit()
 
     if check_diff(orig, zm_out.zone, 'diff between orig & 2'):
@@ -85,8 +144,7 @@ def doit() -> int:
     zp2 = vdns.zoneparser.ZoneParser()
     zp2.parse(zm_out.zone.splitlines())
     zp2_data = zp2.data()
-    dt2 = zp2_data.to_zonedata()
-    zm2 = TestZoneMaker(dt2.data)
+    zm2 = TestZoneMaker(zp2_data.soa.name, zp2_data)
     zm2_out = zm2.doit()
 
     if check_diff(zm_out.zone, zm2_out.zone, 'diff between 2 & 3'):
