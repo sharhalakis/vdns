@@ -1,5 +1,5 @@
-MYPY=mypy --ignore-missing-imports --disallow-untyped-defs
-PYCODESTYLE=pycodestyle --max-line-length=132 --ignore=E266,E501,W503
+MYPY = mypy
+FLAKE8=flake8
 
 all: lint mypy tests
 
@@ -10,19 +10,19 @@ tests:
 	@echo Running tests...
 	PYTHONPATH=src/ pytest-3
 
+lint: mypy pep8 pylint
+	@echo
+	@echo Checking source code...
+
 mypy:
 	@echo
 	@echo Checking types...
 	PYTHONPATH=src/ $(MYPY) src/vdns
 	PYTHONPATH=src/ $(MYPY) src/bin
 
-lint: pep8 pylint
-	@echo
-	@echo Checking lint...
-	
 pylint: 
 	pylint src/vdns
 
 pep8:
-	$(PYCODESTYLE) src/vdns
-	$(PYCODESTYLE) src/bin
+	$(FLAKE8) src/vdns
+	$(FLAKE8) src/bin

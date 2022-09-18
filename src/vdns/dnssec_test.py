@@ -5,6 +5,7 @@ import parameterized
 
 import vdns.dnssec
 
+
 # pylint: disable=protected-access
 
 
@@ -37,7 +38,6 @@ class DNSSECTest(unittest.TestCase):
     def test_clac_dnssec_keyid(self, flags: int, protocol: int, algorithm: int, st: str, keyid: int) -> None:
         res = vdns.dnssec.calc_dnssec_keyid(flags, protocol, algorithm, st)
         self.assertEqual(res, keyid)
-
 
     @parameterized.parameterized.expand([
         ('test2.example.com', 256, 3, 8, 'AwEAAcivnbSxgMkTvzCTA/Py2qqo3EANPUwqL4HalAfNmuDGuFaOu+xT '

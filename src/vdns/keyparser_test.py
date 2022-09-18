@@ -16,7 +16,7 @@ _DEFAULT_IGNORED_FIELDS = ('st_key_pub', 'set_key_priv', 'ttl')
 
 class KeyparserTest(unittest.TestCase):
 
-    def assertDNSSECEqual(self, result: vdns.rr.DNSSEC, expected: vdns.rr.DNSSEC,
+    def assertDNSSECEqual(self, result: vdns.rr.DNSSEC, expected: vdns.rr.DNSSEC,  # noqa: N802
                           ignored: Iterable[str] = _DEFAULT_IGNORED_FIELDS) -> None:
         # Scan each item separately to have a readable error output
         for k in set(result.rrfields) | set(expected.rrfields):

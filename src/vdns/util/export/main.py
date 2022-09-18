@@ -36,13 +36,12 @@ def do_domain(domain: str) -> None:
     @param domain   The domain name, used also as a file name
     """
 
-    ZoneMaker = vdns.zonemaker.ZoneMaker
     config = vdns.util.config.get_config()
 
     outdir = config.outdir
     keydir = config.keydir
 
-    zm = ZoneMaker(domain, zonedir=config.olddir)
+    zm = vdns.zonemaker.ZoneMaker(domain, zonedir=config.olddir)
 
     r = zm.doit(config.dokeys, config.incserial)
     outf = outdir + '/' + domain
