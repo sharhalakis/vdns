@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# coding=UTF-8
-#
 # Copyright (c) 2014-2016 Stefanos Harhalakis <v13@v13.gr>
 # Copyright (c) 2016-2022 Google LLC
 #
@@ -64,19 +61,19 @@ def doit() -> int:
     logging.debug('Output keys directory is %s', keydir)
 
     for net in networks:
-        if not config.doall and not net['network'].compressed in config.networks:
+        if not config.doall and net.network.compressed not in config.networks:
             continue
 
-        do_domain(net['domain'])
+        do_domain(net.domain)
 
     for domain in domains:
-        if not config.doall and not domain['name'] in config.domains:
+        if not config.doall and domain.name not in config.domains:
             continue
 
-        if domain['reverse']:
+        if domain.reverse:
             continue
 
-        do_domain(domain['name'])
+        do_domain(domain.name)
 
     return ret
 

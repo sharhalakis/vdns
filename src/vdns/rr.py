@@ -13,19 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any, Dict, Generic, Optional, Protocol, Sequence, Type, TypeVar, Union
+
 import enum
 import datetime
-import dataclasses as dc
 import ipaddress
+import dataclasses as dc
 
 import vdns.db
+import vdns.vdb
 import vdns.common
 import vdns.parsing
-
-from typing import Any, Dict, Optional, Protocol, Sequence, Type, TypeVar, Union
-
+import vdns.db_tables
 
 T = TypeVar('T', bound='RR')
+TSchema = TypeVar('TSchema', bound=vdns.vdb.Schema)
 
 
 class BadRecordError(Exception):
@@ -80,7 +82,7 @@ class _StringRecord:
 
 
 @dc.dataclass(kw_only=True)
-class RR:
+class RR(Generic[TSchema]):
     """
     There are three hostnames:
     - hostname: The actual hostname record
@@ -92,6 +94,9 @@ class RR:
     domain: str
     hostname: Optional[str] = None
     ttl: Optional[datetime.timedelta] = None
+
+    def __post_init__(self) -> None:
+        self.validate()
 
     # To be reusable after overriding the rrname property
     def _rrname(self) -> str:
@@ -185,16 +190,35 @@ class RR:
         """The hostname to be added to the zone file. In cases like DKIM, the listed hostname has extra parts."""
         return self.hostname
 
-    @property
-    def dbfields(self) -> tuple[str, ...]:
-        """Returns the names of the database fields for this RR."""
-        return 'domain', 'hostname', 'ttl'
+    @classmethod
+    def _from_db_record(cls, dbdata: TSchema) -> dict[str, Any]:
+        """Converts the dbdata to a dict.
 
-    def dbvalues(self) -> vdns.db.QueryArgs:
-        """Returns a dict suitable for an insert to the database."""
-        dt = dc.asdict(self)
-        ret: vdns.db.QueryArgs = {x: dt[x] for x in self.dbfields}
-        return ret
+        Can be overridden by children.
+        """
+        return dc.asdict(dbdata)
+
+    @classmethod
+    def from_db_record(cls: Type[T], dbdata: TSchema) -> T:
+        assert dc.is_dataclass(dbdata)
+        dbdict = cls._from_db_record(dbdata)
+        return cls(**dbdict)
+
+    def _to_db_dict(self) -> dict[str, Any]:
+        """Converts the stored data to a dict.
+
+        Can be overridden by children.
+        """
+        return dc.asdict(self)
+
+    def to_db_record(self, record_type: Type[TSchema]) -> TSchema:
+        dbfields = [x.name for x in dc.fields(record_type)]
+        dt = self._to_db_dict()
+        diff = set(dt.keys()) - set(dbfields)
+        if diff:
+            missing = ', '.join(diff)
+            raise Exception(f'Fields missing from db schema for {self.__class__} -> {record_type}: {missing}')
+        return record_type(**dt)
 
 
 @dc.dataclass(kw_only=True)
@@ -264,6 +288,19 @@ class Host(RR):
         # pylint: disable=unexpected-keyword-arg
         return Host(domain=domain, hostname=r.addr1, ip=ipaddress.ip_address(r.addr2), ttl=r.ttl, reverse=False)
         # pylint: enable=unexpected-keyword-arg
+
+    @classmethod
+    def _from_db_record(cls, dbdata: vdns.db_tables.Host) -> dict[str, Any]:
+        ret = dc.asdict(dbdata)
+        if ret['ip']:
+            ret['ip'] = dbdata.ip.ip
+        return ret
+
+    def _to_db_dict(self) -> dict[str, Any]:
+        ret = dc.asdict(self)
+        if ret['ip']:
+            ret['ip'] = ipaddress.ip_interface(self.ip)
+        return ret
 
 
 @dc.dataclass(kw_only=True)
@@ -396,10 +433,17 @@ class DNSSEC(RR):
     def _records(self) -> Union[_StringRecord, list[_StringRecord]]:
         raise NotImplementedError
 
-    @property
-    def dbfields(self) -> tuple[str, ...]:
-        return ('domain', 'ttl', 'keyid', 'ksk', 'algorithm', 'digest_sha1', 'digest_sha256', 'key_pub',
-                'st_key_pub', 'st_key_priv', 'ts_created', 'ts_activate', 'ts_publish')
+    @classmethod
+    def _from_db_record(cls, dbdata: vdns.db_tables.DNSSEC) -> dict[str, Any]:
+        ret = dc.asdict(dbdata)
+        del ret['id']
+        return ret
+
+    def _to_db_dict(self) -> dict[str, Any]:
+        dt = dc.asdict(self)
+        dt['id'] = None
+        dt.pop('hostname')
+        return dt
 
 
 @dc.dataclass(kw_only=True)
@@ -748,6 +792,15 @@ $TTL\t\t\t{ttl2}; {ttl.human_readable}
 
     def __gt__(self, other: 'SOA') -> bool:
         return self.name > other.name
+
+    @classmethod
+    def from_db_record(cls, dbdata: vdns.db_tables.Domain) -> 'SOA':
+        assert dc.is_dataclass(dbdata)
+        dbdict = dc.asdict(dbdata)
+        del dbdict['reverse']
+        del dbdict['ts']
+        del dbdict['updated']
+        return cls(**dbdict)
 
 
 T_RR_SOA = TypeVar('T_RR_SOA', bound=Union[RR, SOA])

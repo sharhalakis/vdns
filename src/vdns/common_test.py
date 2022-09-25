@@ -15,6 +15,8 @@
 
 import datetime
 import unittest
+import ipaddress
+import dataclasses as dc
 import parameterized
 from parameterized import param
 
@@ -27,6 +29,17 @@ AbortError = vdns.common.AbortError
 # Helpers
 td_1h = datetime.timedelta(hours=1)
 td_1d = datetime.timedelta(days=1)
+
+
+@dc.dataclass
+class DCTest1:
+    st: str
+    ost: Optional[str] = None
+    onum: Optional[int] = None
+    ip: Optional[ipaddress.IPv4Address] = None
+    net: Optional[ipaddress.IPv4Network] = None
+    iface: Optional[ipaddress.IPv4Interface] = None
+    uniopt: Union[Optional[str], int] = None
 
 
 class CommonTest(unittest.TestCase):
@@ -154,3 +167,38 @@ class CommonTest(unittest.TestCase):
     def test_tabify_bad(self) -> None:
         with self.assertRaises(Exception):
             vdns.common.tabify('test', 15)
+
+    @parameterized.parameterized.expand([
+        ({'st': 'a'}, False),
+        # ipaddress stuff
+        ({'st': 'a', 'ip': ipaddress.ip_address('1.1.1.1')}, False),
+        ({'st': 'a', 'net': ipaddress.ip_address('1.1.1.1')}, True),
+        ({'st': 'a', 'iface': ipaddress.ip_address('1.1.1.1')}, True),
+        ({'st': 'a', 'ip': ipaddress.ip_network('1.1.1.0/24')}, True),
+        ({'st': 'a', 'net': ipaddress.ip_network('1.1.1.0/24')}, False),
+        ({'st': 'a', 'iface': ipaddress.ip_network('1.1.1.0/24')}, True),
+        ({'st': 'a', 'ip': ipaddress.ip_interface('1.1.1.1/32')}, True),
+        ({'st': 'a', 'net': ipaddress.ip_interface('1.1.1.1/32')}, True),
+        ({'st': 'a', 'iface': ipaddress.ip_interface('1.1.1.1/32')}, False),
+        # wrong type on required field
+        ({'st': 1}, True),
+        ({'st': b'1'}, True),
+        ({'st': None}, True),
+        # wrong type on optional field
+        ({'st': 'a', 'ost': 'b'}, False),
+        ({'st': 'a', 'ost': None}, False),
+        ({'st': 'a', 'ost': 1}, True),
+        # Union of optional
+        ({'st': 'a', 'uniopt': None}, False),
+        ({'st': 'a', 'uniopt': 1}, False),
+        ({'st': 'a', 'uniopt': 'aa'}, False),
+        ({'st': 'a', 'uniopt': b'bytes'}, True),
+    ])
+    def test_validate_dataclass(self, dt: dict, fail: bool) -> None:
+        if fail:
+            with self.assertRaises(vdns.common.DataclassValidationError):
+                d1 = DCTest1(**dt)
+                vdns.common.validate_dataclass(d1)
+        else:
+            d1 = DCTest1(**dt)
+            vdns.common.validate_dataclass(d1)

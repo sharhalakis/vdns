@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ipaddress
 import logging
 import textwrap
 import unittest
@@ -182,9 +183,11 @@ class TestZoneMaker(unittest.TestCase):
 
         db = vdns.db_testlib.get_db()
         # Add a static entry for the dynamic entry
-        db.add_data('hosts', {'ip': '10.1.1.1', 'domain': domain, 'hostname': 'host1', 'reverse': False, 'ttl': None})
+        db.hosts.insert({'ip': ipaddress.ip_interface('10.1.1.1'), 'domain': domain, 'hostname': 'host1',
+                         'reverse': False, 'ttl': None})
         # Add a non-dynamic entry
-        db.add_data('hosts', {'ip': '10.8.1.1', 'domain': domain, 'hostname': 'host2', 'reverse': False, 'ttl': None})
+        db.hosts.insert({'ip': ipaddress.ip_interface('10.8.1.1'), 'domain': domain, 'hostname': 'host2',
+                         'reverse': False, 'ttl': None})
 
         zm = vdns.zonemaker.ZoneMaker(domain, '/dev/null')
         res = zm.doit(False, False)

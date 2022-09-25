@@ -21,6 +21,7 @@ import datetime
 import dataclasses as dc
 
 import vdns.rr
+import vdns.common
 
 from typing import Optional, Sequence
 

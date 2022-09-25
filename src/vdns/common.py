@@ -18,7 +18,7 @@ import datetime
 import ipaddress
 import dataclasses as dc
 
-from typing import Any, NoReturn, Sequence, Optional, Union
+from typing import Any, NoReturn, Sequence, Optional, Type, Union, get_origin, get_args
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 IPInterface = Union[ipaddress.IPv4Interface, ipaddress.IPv6Interface]
@@ -34,6 +34,12 @@ class AbortError(Exception):
         self.excode = excode
         self.error_shown = error_shown
         super().__init__(*args, **kwargs)
+
+
+class DataclassValidationError(Exception):
+    def __init__(self, field: dc.Field, value: object, data: object) -> None:
+        super().__init__(f'Field {field.name} has type {type(value).__name__}, value {value} '
+                         f'which is not of type {field.type} in: {data}')
 
 
 def reverse_name(net: str) -> str:
@@ -308,12 +314,32 @@ def abort(reason: str) -> NoReturn:
     raise AbortError(reason, excode=1, error_shown=True)
 
 
+def _validate_value_type(value: Any, expected: Sequence[Type]) -> bool:
+    """Implements strict type checking (no subclasses).
+
+    It addresses the problem of ipaddress.IPv4Address being an instance of ipaddress.IPv4Network.
+
+    May need to be relaxed and only check equality when comparing ipaddress classes.
+    """
+
+    for entry in expected:
+        if get_origin(entry) is None:
+            if type(value) == entry:  # pylint: disable=unidiomatic-typecheck
+                return True
+            continue
+        if _validate_value_type(value, get_args(entry)):
+            return True
+    return False
+
+
 def validate_dataclass(d: object) -> None:
+    assert dc.is_dataclass(d)
     fields = dc.fields(d)
     for field in fields:
         value = getattr(d, field.name)
-        if not isinstance(value, field.type):
-            raise Exception(f'Field {field.name} has value {value} which is not of type {field.type} in: {d}')
+        isok = _validate_value_type(value, [field.type])
+        if not isok:
+            raise DataclassValidationError(field, value, d)
 
 
 if __name__ == '__main__':

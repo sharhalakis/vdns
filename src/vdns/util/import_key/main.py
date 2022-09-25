@@ -16,26 +16,31 @@
 import vdns.db
 import vdns.util.config
 import vdns.common
+import vdns.db_tables
 import vdns.keyparser
 
+import datetime
 
-def doit() -> int:
-    config = vdns.util.config.get_config()
 
-    data = vdns.keyparser.parse(config.keyfile, config.domain)
-    data.ttl = config.ttl
+def parse_one(keyfile: str, domain: str, ttl: datetime.timedelta) -> None:
+    data = vdns.keyparser.parse(keyfile, domain)
+    data.ttl = ttl
 
     db = vdns.db.get_db()
 
-    res = db.read_table('dnssec', {'digest_sha1': data.digest_sha1})
+    res = db.dnssec.read_flat({'digest_sha1': data.digest_sha1})
     if not res:
-        res = db.read_table('dnssec', {'digest_sha256': data.digest_sha256})
+        res = db.dnssec.read_flat({'digest_sha256': data.digest_sha256})
 
     if res:
         vdns.common.abort('The key already exists in the database')
 
-    db.insert('dnssec', data.dbvalues())
+    db.dnssec.insert(data.to_db_record(vdns.db_tables.DNSSEC))
 
+
+def doit() -> int:
+    config = vdns.util.config.get_config()
+    parse_one(config.keyfile, config.domain, config.ttl)
     return 0
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

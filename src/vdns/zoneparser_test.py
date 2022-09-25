@@ -148,7 +148,6 @@ ldap             1M     IN      CNAME   host2.v13.gr.
         with mock.patch.object(ZoneParser, '_read_file', return_value=contents.splitlines()):
             zp = ZoneParser(fn='somefile', is_reverse=is_reverse)
         dt = zp.data()
-        print(dt)
         self.maxDiff = 8192
         self.assertEqual(dt.soa, res.soa)
         self.assertCountEqual(dt.hosts, res.hosts)

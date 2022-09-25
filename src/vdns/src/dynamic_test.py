@@ -64,13 +64,13 @@ class DynamicTest(unittest.TestCase):
         assert hosts is not None  # For mypy
 
         # Only the dynamic entry should be returned
-        self.assertIn('10.1.1.1', [x['ip'].compressed for x in hosts])
-        self.assertNotIn('10.1.1.2', [x['ip'].compressed for x in hosts])
+        self.assertIn('10.1.1.1', [x.ip.compressed for x in hosts])
+        self.assertNotIn('10.1.1.2', [x.ip.compressed for x in hosts])
 
         # Only the dynamic host with an entry should exist
-        self.assertIn('host1', [x['hostname'] for x in hosts])
-        self.assertNotIn('host2', [x['hostname'] for x in hosts])
-        self.assertNotIn('host3', [x['hostname'] for x in hosts])
+        self.assertIn('host1', [x.hostname for x in hosts])
+        self.assertNotIn('host2', [x.hostname for x in hosts])
+        self.assertNotIn('host3', [x.hostname for x in hosts])
 
         # If the dynamic file's serial is higher than the known one the turn the dynamic file's
         self.assertEqual(d.determine_dynamic_serial(1), 20220522)

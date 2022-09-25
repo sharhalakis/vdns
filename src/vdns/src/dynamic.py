@@ -21,6 +21,7 @@ import vdns.db
 import vdns.rr
 import vdns.common
 import vdns.src.src0
+import vdns.db_tables
 import vdns.zoneparser
 
 from typing import Optional
@@ -53,11 +54,12 @@ class Dynamic(vdns.src.src0.Source):
         self.zonedir = zonedir
         self.zonefile = zonefile
 
-    def get_dynamic(self) -> vdns.db.DBReadResults:
+    def get_dynamic(self) -> list[vdns.db_tables.Dynamic]:
         """
         Return the dynamic entries of a domain
         """
-        res = self.db.get_domain_related_data('dynamic', self.domain)
+        # res = self.db.get_domain_related_data('dynamic', self.domain)
+        res = self.db.dynamic.read_flat({'domain': self.domain})
 
         return res
 
@@ -78,7 +80,7 @@ class Dynamic(vdns.src.src0.Source):
 
         return ret
 
-    def read_dynamic(self) -> dict[str, dict[str, vdns.db.DBReadResults]]:
+    def read_dynamic(self) -> dict[str, dict[str, list[vdns.rr.Host]]]:
         """
         Read dynamic IP addresses from existing files
 
@@ -99,9 +101,9 @@ class Dynamic(vdns.src.src0.Source):
         logging.debug('Domain %s has %d dynamic entries', self.domain, len(dyns))
 
         # Ensure a record for each dynamic entry
-        ret: dict[str, dict[str, vdns.db.DBReadResults]] = {}
+        ret: dict[str, dict[str, list[vdns.rr.Host]]] = {}
         for dyn in dyns:
-            hn = dyn['hostname']
+            hn = dyn.hostname
             if hn is None:
                 hn = ''
             ret[hn] = {'a': [], 'aaaa': []}
@@ -128,20 +130,13 @@ class Dynamic(vdns.src.src0.Source):
             else:
                 rrtype = 'aaaa'
 
-            ret[hn][rrtype].append({
-                'domain': self.domain,
-                'hostname': hn,
-                'ip': host.ip,
-                'ip_str': host.ip.compressed,
-                'ttl': host.ttl,
-                'reverse': False,
-            })
+            assert host.domain == self.domain
+            assert host.hostname == hn
+            ret[hn][rrtype].append(host)
 
-        #        pprint(zoneinfo)
-        #        pprint(ret)
         return ret
 
-    def get_hosts(self) -> Optional[vdns.db.DBReadResults]:
+    def get_hosts(self) -> Optional[list[vdns.rr.Host]]:
         """
         Return the host entries taking care of dynamic entries
 
@@ -161,7 +156,7 @@ class Dynamic(vdns.src.src0.Source):
         for host, entries in dynamic.items():
             for i in ('a', 'aaaa'):
                 for entry in entries[i]:
-                    logging.debug('Adding dynamic entry %s %s %s', host, i, entry['ip_str'])
+                    logging.debug('Adding dynamic entry %s %s %s', host, i, entry.ip.compressed)
                     hosts.append(entry)
 
         return hosts
@@ -194,8 +189,8 @@ class Dynamic(vdns.src.src0.Source):
         if not self.db.is_dynamic(dom):
             return None
 
-        domain = self.db.read_table_one('domains', {'name': dom})
-        network = self.db.read_table_one('networks', {'domain': dom})
+        domain = self.db.domains.read_one({'name': dom})
+        network = self.db.networks.read_one({'domain': dom})
 
         if not domain:
             return None
@@ -203,8 +198,8 @@ class Dynamic(vdns.src.src0.Source):
         ret = vdns.src.src0.DomainData(dom)
 
         if network:
-            ret.name = vdns.common.reverse_name(network['network'])
-            ret.network = network['network']
+            ret.name = vdns.common.reverse_name(network.network.compressed)
+            ret.network = network.network
         else:
             ret.name = dom
 
@@ -214,8 +209,9 @@ class Dynamic(vdns.src.src0.Source):
         if not hosts:
             return None
 
-        ret.serial = self.determine_dynamic_serial(domain['serial'])
-        ret.hosts = [vdns.rr.make_rr(vdns.rr.Host, x) for x in hosts]
+        assert domain.serial is not None
+        ret.serial = self.determine_dynamic_serial(domain.serial)
+        ret.hosts = hosts
 
         return ret
 
@@ -238,7 +234,5 @@ class Dynamic(vdns.src.src0.Source):
     def set_serial(self, serial: int) -> None:
         # We don't store serial numbers
         pass
-
-# End of class Dynamic
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:

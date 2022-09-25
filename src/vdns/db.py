@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-#
 # Copyright (c) 2014-2016 Stefanos Harhalakis <v13@v13.gr>
 # Copyright (c) 2016-2022 Google LLC
 #
@@ -15,19 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# coding=UTF-8
-
 import logging
 import argparse
-import psycopg2
-import psycopg2.extras
-import ipaddress
 import dataclasses as dc
 
+from vdns import db_tables
+import vdns.vdb
 import vdns.util.config
 import vdns.common
 
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 _db: Optional['DB'] = None
 
@@ -50,126 +45,78 @@ DBReadRow = dict[str, Any]
 DBReadResults = list[DBReadRow]
 QueryArgs = dict[str, Any]
 
+Table = vdns.vdb.Table
+
 
 class DB:
+    db: Optional[vdns.vdb.DB]
 
-    db: Optional[psycopg2.extensions.connection]
+    cnames: Table[db_tables.CName]
+    domains: Table[db_tables.Domain]
+    dkim: Table[db_tables.DKIM]
+    dnssec: Table[db_tables.DNSSEC]
+    dynamic: Table[db_tables.Dynamic]
+    hosts: Table[db_tables.Host]
+    mx: Table[db_tables.MX]
+    networks: Table[db_tables.Network]
+    ns: Table[db_tables.NS]
+    srv: Table[db_tables.SRV]
+    sshfp: Table[db_tables.SSHFP]
+    txt: Table[db_tables.TXT]
+
+    net_hosts: Table[db_tables.Host]
+    subdomains: Table[db_tables.Domain]
 
     def __init__(self, dbname: str, dbuser: Optional[str] = None, dbpass: Optional[str] = None,
-                 dbhost: Optional[str] = None, dbport: Optional[str] = None) -> None:
+                 dbhost: Optional[str] = None, dbport: Optional[int] = None) -> None:
 
-        psycopg2.extras.register_ipaddress()
-
-        db = psycopg2.connect(
-            database=dbname,
-            user=dbuser,
-            password=dbpass,
-            host=dbhost,
-            port=dbport
-        )
-
-        if db is None:
-            vdns.common.abort('Failed to connect to db')
-
+        db = self._connect(dbname=dbname, dbuser=dbuser, dbpass=dbpass, dbhost=dbhost, dbport=dbport)
         logging.debug('Connected to db')
 
         self.db = db
+        self._init_tables()
+
+    def _connect(self, dbname: str, dbuser: Optional[str] = None, dbpass: Optional[str] = None,
+                 dbhost: Optional[str] = None, dbport: Optional[int] = None) -> vdns.vdb.DB:
+        try:
+            ret = vdns.vdb.DB(dbname=dbname, dbuser=dbuser, dbpass=dbpass, dbhost=dbhost, dbport=dbport)
+        except vdns.vdb.VDBError:
+            vdns.common.abort('Failed to connect to db')
+        return ret
+
+    def _init_tables(self) -> None:
+        assert self.db is not None
+        db = self.db
+        self.cnames = db.get_table('cnames', db_tables.CName)
+        self.domains = db.get_table('domains', db_tables.Domain)
+        self.dkim = db.get_table('dkim', db_tables.DKIM)
+        self.dnssec = db.get_table('dnssec', db_tables.DNSSEC)
+        self.dynamic = db.get_table('dynamic', db_tables.Dynamic)
+        self.hosts = db.get_table('hosts', db_tables.Host)
+        self.mx = db.get_table('mx', db_tables.MX)
+        self.networks = db.get_table('networks', db_tables.Network)
+        self.ns = db.get_table('ns', db_tables.NS)
+        self.srv = db.get_table('srv', db_tables.SRV)
+        self.sshfp = db.get_table('sshfp', db_tables.SSHFP)
+        self.txt = db.get_table('txt', db_tables.TXT)
+
+        self.net_hosts = vdns.vdb.QueryTable(db, db_tables.Host)
+        self.subdomains = vdns.vdb.QueryTable(db, db_tables.Domain)
 
     def close(self) -> None:
         if self.db is not None:
             self.db.close()
             self.db = None
 
-    def _query_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> psycopg2.extensions.cursor:
-        """Executes a raw query and returns the cursor."""
-        assert self.db is not None
-        cur = self.db.cursor()
-        cur.execute(query, kwargs)
-        return cur
-
-    def _read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
-        """No logging version."""
-        cur = self._query_raw(query, kwargs)
-        colnames = [x.name for x in cur.description]
-
-        return [dict(zip(colnames, x)) for x in cur]
-
-    def read_table_raw(self, query: str, kwargs: Optional[QueryArgs] = None) -> DBReadResults:
-        logging.debug('Executing query: %s', query)
-        res = self._read_table_raw(query, kwargs)
-        return res
-
-    def read_table(self, tbl: str, where: Optional[QueryArgs] = None) -> DBReadResults:
-        if where is None:
-            where = {}
-        # Construct the WHERE part
-        where2 = []
-        args = {}
-        for k, v in where.items():
-            if v is None:
-                st = f'{k} IS NULL'
-            else:
-                keyname = 'k_' + k
-                st = f'{k}=%({keyname})s'
-                args[keyname] = v
-            where2.append(st)
-
-        if where2:
-            st_where = ' AND '.join(where2)
-            st_where = ' WHERE ' + st_where
-        else:
-            st_where = ''
-
-        query = f'SELECT * FROM {tbl}{st_where}'
-        res = self._read_table_raw(query, args)
-
-        return res
-
-    def read_table_one(self, tbl: str, where: QueryArgs) -> Optional[DBReadRow]:
-        r = self.read_table(tbl, where)
-
-        if len(r) > 1:
-            raise Exception('Got multiple results')
-
-        if r:
-            ret = r[0]
-        else:
-            ret = None
-
-        return ret
-
-    def _mk_insert(self, table: str, values: QueryArgs) -> str:
-        keys_lst: list[str] = []
-        values_lst: list[str] = []
-        for key in values:
-            keys_lst.append(key)
-            values_lst.append(f'%({key})s')
-
-        st_keys = ', '.join(keys_lst)
-        st_values = ', '.join(values_lst)
-
-        query = f'INSERT INTO {table}({st_keys}) VALUES({st_values})'
-
-        return query
-
-    def insert(self, table: str, values: QueryArgs) -> None:
-        assert self.db is not None
-        query = self._mk_insert(table, values)
-        logging.debug('Executing insert: %s', query)
-        _ = self._query_raw(query, values)
-        self.db.commit()
-
     def store_serial(self, domain: str, newserial: int) -> None:
         """
         Store a new serial number for a domain and update ts
         """
         query = 'UPDATE domains SET serial=%(newserial)s, ts=updated WHERE name=%(domain)s'
-        args = {'domain': domain, 'newserial': newserial}
+        args: vdns.vdb.WhereParam = {'domain': domain, 'newserial': newserial}
 
         assert self.db is not None
-        cur = self.db.cursor()
-        cur.execute(query, args)
-        self.db.commit()
+        self.db.exec(query, args)
 
     def is_dynamic(self, domain: str) -> bool:
         """
@@ -177,42 +124,10 @@ class DB:
 
         @return True when a domain has at least one dynamic entry
         """
-        query = 'SELECT * FROM dynamic WHERE domain=%(domain)s LIMIT 1'
-        args = {'domain': domain}
+        res = self.dynamic.read_one({'domain': domain})
+        return bool(res)
 
-        res = self._read_table_raw(query, args)
-
-        return len(res) > 0
-
-    def fixip(self, ip: Any) -> Union[ipaddress.IPv4Address, ipaddress.IPv6Address]:
-        if isinstance(ip, (ipaddress.IPv4Interface, ipaddress.IPv6Interface)):
-            assert ip.network.prefixlen == ip.max_prefixlen
-            ip = ip.ip
-        return ip
-
-    def get_domain_related_data(self, tbl: str, domain: str, order: Optional[str] = None) -> DBReadResults:
-        """
-        Return all data from table tbl that are related to domain
-        Table should have a column named domain
-        """
-        query = 'SELECT * FROM ' + tbl + ' WHERE domain=%(domain)s'
-        if order is not None:
-            query += ' ORDER BY ' + order
-        args = {'domain': domain}
-
-        res = self.read_table_raw(query, args)
-
-        for i in res:
-            if 'hostname' not in i:
-                i['hostname'] = ''
-            if 'ip' in i:
-                # Postgres returns IPv[46]Interface instead IPv[46]Address, so extract the address
-                i['ip'] = self.fixip(i['ip'])
-                i['ip_str'] = i['ip'].compressed
-
-        return res
-
-    def get_subdomains(self, domain: str) -> DBReadResults:
+    def get_subdomains(self, domain: str) -> list[db_tables.Domain]:
         """
         Return the direct subdomain records of a domain
         """
@@ -222,41 +137,32 @@ class DB:
                     AND d1.name LIKE '%%.' || d2.name )"""
         args = {'st': '%.' + domain}
 
-        res = self._read_table_raw(query, args)
+        res = self.subdomains.read_q(query, args)
 
         return res
 
-    def get_domains(self) -> DBReadResults:
+    def get_domains(self) -> list[db_tables.Domain]:
         """!
         @return all domains
         """
-        ret = self.read_table('domains')
+        return self.domains.read_flat()
 
-        return ret
-
-    def get_networks(self) -> DBReadResults:
+    def get_networks(self) -> list[db_tables.Network]:
         """!
         @return all networks
         """
-        ret = self.read_table('networks')
+        return self.networks.read_flat()
 
-        return ret
-
-    def get_net_hosts(self, net: vdns.common.IPNetwork) -> DBReadResults:
+    def get_net_hosts(self, net: vdns.common.IPNetwork) -> list[vdns.db_tables.Host]:
         """
         Return all host entries that belong to that network
         """
-        query = 'SELECT *, family(ip) AS family FROM hosts WHERE ip << %(net)s'
-        args = {'net': net}
+        query = 'SELECT * FROM hosts WHERE ip << %(net)s'
+        args: vdns.vdb.WhereParam = {'net': net}
 
-        res = self.read_table_raw(query, args)
-        for x in res:
-            x['ip'] = self.fixip(x['ip'])
-            x['ip_str'] = x['ip'].compressed
+        res = self.hosts.read_q(query, args)  # TODO: IPNetwork is valid for Where
 
         return res
-
-# End of class DB
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:
@@ -264,14 +170,10 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     config = _Config()
     vdns.util.config.set_module_config('db', config)
 
-    parser.add_argument('--dbname', default=config.dbname,
-                        help='Database name (def: %(default)s)')
-    parser.add_argument('--dbuser', default=config.dbuser,
-                        help='Database user (def: %(default)s)')
-    parser.add_argument('--dbhost', default=config.dbhost,
-                        help='Database host (def: %(default)s)')
-    parser.add_argument('--dbport', default=config.dbport,
-                        help='Database port (def: %(default)s)')
+    parser.add_argument('--dbname', default=config.dbname, help='Database name (def: %(default)s)')
+    parser.add_argument('--dbuser', default=config.dbuser, help='Database user (def: %(default)s)')
+    parser.add_argument('--dbhost', default=config.dbhost, help='Database host (def: %(default)s)')
+    parser.add_argument('--dbport', default=config.dbport, help='Database port (def: %(default)s)')
 
 
 def handle_args(args: argparse.Namespace) -> None:
@@ -290,7 +192,6 @@ def init_db() -> DB:
     if _db is not None:
         _db.close()
 
-    # def init_db() -> None:
     config = vdns.util.config.get_config()
 
     _db = DB(
@@ -308,9 +209,5 @@ def get_db() -> DB:
         raise NoDatabaseConnectionError()
 
     return _db
-
-
-if __name__ == '__main__':
-    pass
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
