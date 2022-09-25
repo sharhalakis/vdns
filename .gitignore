@@ -18,3 +18,4 @@ vdns-*.tar.gz
 vdns.iml
 .idea/
 *.v
+local/
