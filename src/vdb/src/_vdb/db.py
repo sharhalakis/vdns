@@ -37,16 +37,16 @@ class DB0:
     # True if there was a rollback
     transaction_rollback: bool
 
-    def __init__(self, dbname: str, dbuser: str, dbpass: Optional[str] = None, dbhost: Optional[str] = None):
-        logging.debug('Connecting to %s@%s (user=%s)', dbname, dbhost, dbuser)
+    def __init__(self, dbname: str, dbuser: Optional[str], dbpass: Optional[str] = None, dbhost: Optional[str] = None,
+                 dbport: Optional[int] = None):
+        logging.debug('Connecting to %s@%s:%s (user=%s)', dbname, dbhost, dbport, dbuser)
 
-        self.db = self._connect(dbname=dbname, dbuser=dbuser, dbpass=dbpass, dbhost=dbhost)
+        self.db = self._connect(dbname=dbname, dbuser=dbuser, dbpass=dbpass, dbhost=dbhost, dbport=dbport)
         self.transaction_depth = 0
         self.transaction_rollback = False
 
-    def _connect(self, dbname: str, dbuser: str, dbpass: Optional[str],
-                 dbhost: Optional[str]) -> psycopg2.extensions.connection:
-        # psycopg2.extras.register_inet()
+    def _connect(self, dbname: str, dbuser: Optional[str], dbpass: Optional[str], dbhost: Optional[str],
+                 dbport: Optional[int]) -> psycopg2.extensions.connection:
         psycopg2.extras.register_ipaddress()
 
         db = psycopg2.connect(
@@ -54,6 +54,7 @@ class DB0:
             user=dbuser,
             password=dbpass,
             host=dbhost,
+            port=dbport,
         )
 
         if db is None:
@@ -65,7 +66,8 @@ class DB0:
             # Don't fail if there is no json datatype in the DB
             pass
 
-        db.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        # db.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        db.set_session(autocommit=True)
         db.set_client_encoding('utf-8')
 
         logging.debug('Connected to %s@%s (user=%s)', dbname, dbhost, dbuser)
@@ -215,6 +217,9 @@ class DB0:
         else:
             self.transaction_rollback = True
 
+    def exec(self, query: str, args: Optional[Mapping[str, SupportedTypes]] = None) -> psycopg2.extensions.cursor:
+        return self._exec(query, args)
+
     def read_q(self, query: str, args: Optional[Mapping[str, SupportedTypes]] = None) -> ResultsDict:
         """!
         Execute a query and return all results
@@ -295,14 +300,6 @@ class DB0:
         c = self._exec(query, args)
 
         return c.rowcount
-
-    #    def read_NOTREADY(self, table, keys, where={}, sort=[]):
-    #        """!
-    #        Same as read_flat but return a dictionary instead
-    #        """
-    #        query, args = self._form_query(table, where, sort)
-    #
-    #        # TODO
 
     def table_exists(self, table: str) -> bool:
         """!
