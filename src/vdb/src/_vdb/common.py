@@ -17,7 +17,8 @@ from typing import Collection, Mapping, Union
 
 import ipaddress
 
-SupportedTypes = Union[str, int, float, bool, ipaddress.IPv4Interface, ipaddress.IPv6Interface, dict, list, None]
+SupportedTypes = Union[str, int, float, bool, ipaddress.IPv4Interface, ipaddress.IPv6Interface,
+                       ipaddress.IPv4Network, ipaddress.IPv6Network, dict, list, None]
 
 # Convenience types
 ResultDict = dict[str, SupportedTypes]  # A result in dict form
