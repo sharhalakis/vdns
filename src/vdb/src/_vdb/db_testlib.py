@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pylint: disable=protected-access
-#
 # Emulates a fake db for tests. Normal usage:
 #
 # def setUp(self) -> None:
@@ -37,6 +35,9 @@
 #   self._db = db
 #   self._db_patcher = patcher
 
+# pylint: disable=protected-access
+
+import ipaddress
 from typing import Mapping, NoReturn, Optional, Sequence, Type, TypeVar, Union, overload
 
 import types
@@ -47,7 +48,7 @@ import unittest.mock
 import dataclasses as dc
 
 from . import db
-from .table import Table
+from .table import Table, TSchema
 from .common import OrderParam, ResultDict, ResultsDict, SupportedTypes, ValueParam, WhereParam
 from .schemadb import DB
 
@@ -95,14 +96,17 @@ class TestDB(DB):
         self._data = {}
         self._sequences = {}
 
-    def _connect(self, dbname: str, dbuser: str, dbpass: Optional[str],
-                 dbhost: Optional[str]) -> psycopg2.extensions.connection:
+    def _connect(self, dbname: str, dbuser: Optional[str], dbpass: Optional[str], dbhost: Optional[str],
+                 dbport: Optional[int]) -> psycopg2.extensions.connection:
         assert _orig_psycopg2 is not None
         ret = unittest.mock.MagicMock(_orig_psycopg2.extensions.connection)
         return ret
 
     def set_data(self, table: str, columns: Sequence[str], data: Rows) -> None:
         self.set_table_schema(table, columns)
+        self._data[table] = [list(x) for x in data]
+
+    def set_data_only(self, table: str, data: Rows) -> None:
         self._data[table] = [list(x) for x in data]
 
     def get_data(self, table: str) -> list[tuple[SupportedTypes, ...]]:
@@ -125,15 +129,23 @@ class TestDB(DB):
             if not columns:
                 raise Exception('Empty columns list')
             self._columns[table] = columns
+            self._data.setdefault(table, [])
             ret = None
         elif dc.is_dataclass(columns):
-            self._columns[table] = [x.name for x in dc.fields(columns)]
+            # self._columns[table] = [x.name for x in dc.fields(columns)]
+            # Get table sets the schema
             ret = self.get_table(table, columns)
         else:
             raise Exception(f'Bad column definition: {type(columns)}: {columns}')
 
         self._data.setdefault(table, [])
         return ret
+
+    def get_table(self, table: str, schema: Type[TSchema]) -> Table[TSchema]:
+        # Use the opportunity to set the schema on get_table()
+        self._columns[table] = [x.name for x in dc.fields(schema)]
+        self._data.setdefault(table, [])
+        return super().get_table(table, schema)
 
     def _read_raw(self, query: str, kwargs: Optional[dict[str, str]] = None) -> ResultsDict:
         fail()
@@ -171,14 +183,17 @@ class TestDB(DB):
 
         def _key(x: ResultDict) -> tuple:
             assert sort is not None
-            ret: list[SupportedTypes] = []
+            ret: list[Union[SupportedTypes, tuple]] = []
             for k in sort:
                 if x is None:
                     ret.append(None)
                 # elif dc.is_dataclass(x):
                 #     ret.append(getattr(x, k))
                 elif isinstance(x, dict):
-                    ret.append(x[k])
+                    dt: Union[SupportedTypes, tuple] = x[k]
+                    if isinstance(dt, (ipaddress.IPv4Interface, ipaddress.IPv6Interface)):
+                        dt = (dt.ip.version, dt)
+                    ret.append(dt)
                 else:
                     raise Exception('WTF?')
             return tuple(ret)
@@ -222,9 +237,10 @@ class TestDB(DB):
         return ret
 
     def insert(self, table: str, values: ValueParam) -> int:
-        assert set(values.keys()) == set(self._columns[table]), f'Bad columns in values: {values}'
+        assert not (set(values.keys()) - set(self._columns[table])), \
+            f'Bad columns in values: {values}, expected: {self._columns[table]}'
         logging.debug('FakeDB Insert to %s: %s', table, values)
-        self._data[table].append([values[x] for x in self._columns[table]])
+        self._data[table].append([values.get(x, None) for x in self._columns[table]])
         return 1
 
     def update(self, table: str, values: ValueParam, where: WhereParam) -> int:
