@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .table import Schema, Table
+from .table import QueryTable, Schema, Table, TSchema
 from .table import RowNotLikeSchemaError, SchemaTableError
 from .common import OrderParam, ParamDict, ResultDict, ResultsDict, SupportedTypes, ValueParam, WhereParam
 from .common import VDBError
 from .schemadb import DB
+from .db_testlib import TestDB
 from .versioneddb import VersionedDB, init_db
