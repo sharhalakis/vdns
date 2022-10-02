@@ -1,526 +1,247 @@
-#!/usr/bin/env python
-# coding=UTF-8
+# Copyright (c) 2014-2016 Stefanos Harhalakis <v13@v13.gr>
+# Copyright (c) 2016-2022 Google LLC
 #
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import sys
-import struct
-import base64
-import hashlib
 import logging
+import datetime
+import dataclasses as dc
 
-from argparse import ArgumentParser
 from pprint import pprint
+from typing import Iterable, Optional
 
-__all__=["ZoneParser"]
+__all__ = ['ZoneParser']
 
-db=None
+import vdns.rr
+import vdns.src.src0
+import vdns.zone0
+import vdns.common
+import vdns.parsing
+import vdns.keyparser
 
-# List if known RRs. We only need to list those that we handle.
-rrs=['A', 'AAAA', 'NS', 'CNAME', 'MX', 'TXT', 'SOA', 'DNSKEY', 'PTR']
+db = None
 
-def is_ttl(st):
-    if st[0] in ('1', '2', '3', '4', '5', '6', '7', '8' ,'9', '0') \
-        and st[-1]!='.' and 'arpa' not in st:
-        ret=True
-    else:
-        ret=False
 
-    return(ret)
+@dc.dataclass
+class Entry:
+    addr1: Optional[str] = ''
+    ttl: Optional[datetime.timedelta] = None
+    rr: str = ''
+    addr2: str = ''
 
-def cleanup_line(line0):
-    ''' Clean a line by removing comments and starting/trailing space '''
-    line=line0.strip()
-    if line.find(';')>=0:
-        line=line[:line.find(';')]
 
-    return(line)
-
-def parse_line(line0):
-    global rrs
-
-    line=cleanup_line(line0)
-
-    if len(line)==0 or line[0]==';':
-        return(None)
-
-    items=line.split()
-
-    addr1=None
-    ttl=None
-    rr=None
-    addr2=None
-
-    add=0
-
-    rridx=None
-
-    # Nothing to do for these
-    if items[0] in ('RRSIG', 'NSEC'):
-        return(None)
-
-    # Find the type
-    for i in range(len(items)):
-        if items[i] in rrs:
-            rridx=i
-            add=i+1
-            break
-
-    if rridx==None:
-        return(None)
-
-    rr=items[rridx]
-    addr2=' '.join(items[add:])
-
-    for i in range(rridx):
-        if items[i]=='IN':
-            continue
-
-        if ttl==None and is_ttl(items[i]):
-            ttl=items[i]
-        elif addr1==None:
-            addr1=items[i]
-        else:
-            logging.warning('Could not parse line: ' + line)
-            return(None)
-
-    ret=(addr1, ttl, 'IN', rr, addr2)
-
-    return(ret)
-
-def sinn(val, char):
-    # Strip if not None
-    if val==None:
-        ret=None
-    else:
-        ret=val.strip(char)
-
-    return(ret)
-
-def ein(val):
-    # Return empty if it's null
-    if val==None:
-        return('')
-    return(val)
-
-def esinn(val, char):
-    return(ein(sinn(val, char)))
-
-def error(st):
-    logging.error(st)
-    sys.exit(1)
-
-def insert(tbl, fields, values):
-
-    values2=[]
-    for v in values:
-        if v==None:
-            values2.append('NULL')
-        elif type(v)==str and len(v)>0 and v[0]=='\x00':
-            values2.append(v[1:])
-        else:
-            values2.append("'%s'" % v)
-
-    st="INSERT INTO %s(%s) VALUES(%s);" % \
-        (tbl, ', '.join(fields), ', '.join(values2))
-
-    return(st)
-
-def ins_soa(name, reverse, ttl, refresh, retry, expire, minimum, contact,
-            serial, ns0):
-    name2=esinn(name, '.')
-    contact2=esinn(contact, '.')
-    ns02=ns0.strip('.')
-
-    ret=insert('domains',
-        ('name', 'reverse', 'ttl', 'refresh', 'retry', 'expire', 'minimum',
-            'contact', 'serial', 'ns0'),
-        (name2, reverse, ttl, refresh, retry, expire, minimum, contact2,
-         serial, ns02))
-
-    return(ret)
-
-def ins_a(domain, host, ip, ttl):
-    host2=esinn(host, '.')
-    domain2=domain.strip('.')
-
-    ret=insert('hosts', ('ip', 'domain', 'hostname', 'ttl'),
-        (ip, domain2, host2, ttl))
-
-    return(ret)
-
-def ins_cname(domain, host, host0, ttl):
-    host2=esinn(host, '.')
-    host02=host0.strip('.')
-    domain2=domain.strip('.')
-
-    ret=insert('cnames', ('domain', 'hostname', 'hostname0', 'ttl'),
-        (domain2, host2, host02, ttl))
-
-    return(ret)
-
-def ins_txt(domain, host, txt, ttl):
-    host2=esinn(host, '.')
-    domain2=domain.strip('.')
-    txt2=txt.strip('"')
-
-    ret=insert('txt', ('domain', 'hostname', 'txt', 'ttl'),
-        (domain2, host2, txt2, ttl))
-
-    return(ret)
-
-def ins_ns(domain, ns, ttl):
-    domain2=domain.strip('.')
-    ns2=ns.strip('.')
-
-    ret=insert('ns', ('domain', 'ns', 'ttl'),
-        (domain2, ns2, ttl))
-
-    return(ret)
-
-def ins_mx(domain, hostname, priority, mx, ttl):
-    domain2=domain.strip('.')
-    hostname2=esinn(hostname, '.')
-    mx2=mx.strip('.')
-
-    ret=insert('mx', ('domain', 'hostname', 'priority', 'mx', 'ttl'),
-        (domain2, hostname2, priority, mx2, ttl))
-
-    return(ret)
-
-def calc_dnssec_keyid(flags, protocol, algorithm, st):
+@dc.dataclass
+class ParsedDomainData(vdns.src.src0.DomainData):
+    """Holds the extra data that parsing produces.
+    It produces more data than DomainData can hold, like DS records.
     """
-    Calculate the keyid based on the key string
-    """
+    ds: list[vdns.rr.DS] = dc.field(default_factory=list)
 
-    st0=st.replace(' ', '')
-    st2=struct.pack('!HBB', int(flags), int(protocol), int(algorithm))
-    st2+=base64.b64decode(st0)
 
-    cnt=0
-    for idx in range(len(st2)):
-        s=struct.unpack('B', st2[idx])[0]
-        if (idx % 2) == 0:
-            cnt+=s<<8
-        else:
-            cnt+=s
-
-    ret=((cnt & 0xFFFF) + (cnt>>16)) & 0xFFFF
-
-    return(ret)
-
-def calc_ds_sigs(owner, flags, protocol, algorithm, st):
-    """
-    Calculate the DS signatures
-
-    Return a dictionary where key is the algorithm and value is the value
-    """
-
-    st0=st.replace(' ', '')
-    st2=struct.pack('!HBB', int(flags), int(protocol), int(algorithm))
-    st2+=base64.b64decode(st0)
-
-    # Transform owner from A.B.C to <legth of A>A<length of B>B<length of C>C0
-
-    if owner[-1]=='.':
-        owner2=owner
-    else:
-        owner2=owner+'.'
-
-    owner3=''
-    for i in owner2.split('.'):
-        owner3+=struct.pack('B', len(i))+i
-
-    st3=owner3+st2
-
-    ret={
-        'sha1':     hashlib.sha1(st3).hexdigest().upper(),
-        'sha256':   hashlib.sha256(st3).hexdigest().upper(),
-    }
-
-    return(ret)
-
-def ins_dnssec_no(domain, hostname, flags, protocol, algorithm, key_pub):
-    domain2=domain.strip('.')
-    hostname2=esinn(hostname, '.')
-
-    keyid=calc_dnssec_keyid(flags, protocol, algorithm, key_pub)
-
-    print('keyid', keyid)
-
-    insert('dnssec',
-        ('domain', 'hostname', 'keyid', 'algorithm', 'key_pub'),
-        (domain2, hostname2, keyid, algorithm, key_pub))
-
-def handle_entry(domain, r):
-    addr1=r[0]
-    addr2=r[4]
-    ttl=r[1]
-    rr=r[3]
-
-    if rr=='PTR':
-        logging.info("Ignoring PTR: " + repr(r))
-    elif rr=='A' or rr=='AAAA':
-        ins_a(domain, addr1, addr2, ttl)
-    elif rr=='CNAME':
-        ins_cname(domain, addr1, addr2, ttl)
-    elif rr=='NS':
-        # Don't do NS records for a zone here (i.e. when addr1!='')
-        # We will collect them from the zone itself (i.e when addr1=='')
-        if addr1!=None and addr1!='':
-            logging.info('Skipping NS record for %s.%s' % (addr1, domain))
-        else:
-            ins_ns(domain, addr2, ttl)
-    elif rr=='TXT':
-        ins_txt(domain, addr1, addr2, ttl)
-    elif rr=='MX':
-        t=addr2.split(None, 1)
-        ins_mx(domain, addr1, int(t[0]), t[1], ttl)
-#    elif rr=='DS':
-#        t=addr2.split(None, 3)
-#        if (t[2]!='1'):
-#            msg('Unrecognized DS record: %s' % addr2)
-#        else:
-#            ins_ds(domain, addr1, t[0], t[1], t[2], t[3])
-#    elif rr=='DNSKEY':
-#        t=addr2.split(None, 3)
-##        if (t[2]!='1'):
-##            msg('Unrecognized DNSKEY record: %s' % addr2)
-##        else:
-#        ins_dnssec(domain, addr1, t[0], t[1], t[2], t[3])
-    else:
-        logging.info("Unhandled %s:" % (rr,) + repr(r))
-
-def parse_ttl(st):
-    """
-    Parse ttl and return the duration in seconds
-    """
-    deltas={
-        'M':    60,
-        'H':    3600,
-        'D':    86400,
-        'W':    86400*7,
-    }
-
-    # If this is already a number
-    if type(st)==int:
-        ret=st
-    elif st[-1].isdigit():
-        ret=int(st)
-    else:
-        ret=int(st[:-1])
-        w=st[-1].upper()
-        ret*=deltas[w]
-
-    return(ret)
-
-class ZoneParser(object):
+class ZoneParser:
     """
     A class to read and parse a zone file
     """
+    dt: ParsedDomainData
+    is_reverse: bool
 
-    def __init__(self, fn=None, zone=None, is_reverse=False):
-        self.zero()
-        self.is_reverse=is_reverse
+    def __init__(self, fn: Optional[str] = None, zone: Optional[str] = None, is_reverse: bool = False) -> None:
+        self.dt = ParsedDomainData()
+        self.is_reverse = is_reverse
 
-        if fn!=None:
+        if fn is not None:
             self.read(fn, zone)
 
-    def zero(self):
-        self.dt={
-            'domain':       None,
-            'soa':          None,
-            'a':            [],
-            'aaaa':         [],
-            'ptr':          [],
-            'cname':        [],
-            'ns':           [],
-            'txt':          [],
-            'mx':           []
-        }
-
-    def add_entry(self, r):
-        addr1=r[0]
-        addr2=r[4]
-        ttl=r[1]
-        rr=r[3]
-
-        if rr=='PTR':
-            logging.info("Ignoring PTR: " + repr(r))
-        elif rr=='A' or rr=='AAAA':
-            dt=[addr1, addr2, ttl]
-            if rr=='A':
-                self.dt['a'].append(dt)
+    def add_entry(self, r: Entry, domain: str) -> None:
+        if r.rr == 'PTR':
+            logging.info('Ignoring PTR: %r', r)
+        elif r.rr in ('A', 'AAAA'):
+            self.dt.hosts.append(vdns.rr.Host.parse_line(domain, r))
+        elif r.rr == 'CNAME':
+            self.dt.cnames.append(vdns.rr.CNAME.parse_line(domain, r))
+        elif r.rr == 'SSHFP':
+            self.dt.sshfp.append(vdns.rr.SSHFP.parse_line(domain, r))
+        elif r.rr == 'NS':
+            self.dt.ns.append(vdns.rr.NS.parse_line(domain, r))
+        elif r.rr == 'TXT':
+            try:
+                dkim = vdns.rr.DKIM.parse_line(domain, r)
+                self.dt.dkim.append(dkim)
+            except vdns.rr.ParseError:
+                txt = vdns.rr.TXT.parse_line(domain, r)
+                self.dt.txt.append(txt)
+        elif r.rr == 'MX':
+            self.dt.mx.append(vdns.rr.MX.parse_line(domain, r))
+        elif r.rr == 'DNSKEY':
+            self.dt.dnssec.append(vdns.rr.DNSKEY.parse_line(domain, r))
+        elif r.rr == 'DS':
+            ds = vdns.rr.DS.parse_line(domain, r)
+            # Try to find an existing entry because DS records have two entries
+            dsold: Optional[vdns.rr.DNSSEC] = None
+            for dsold in self.dt.ds:
+                if ds.keyid == dsold.keyid:
+                    break
+            if dsold and ds.keyid == dsold.keyid:
+                dsold.digest_sha1 = ds.digest_sha1 or dsold.digest_sha1
+                dsold.digest_sha256 = ds.digest_sha256 or dsold.digest_sha256
             else:
-                self.dt['aaaa'].append(dt)
-        elif rr=='CNAME':
-            dt=[addr1, addr2, ttl]
-            self.dt['cname'].append(dt)
-        elif rr=='NS':
-            # Don't do NS records for a zone here (i.e. when addr1!='')
-            # We will collect them from the zone itself (i.e when addr1=='')
-            if addr1!=None and addr1!='':
-                logging.info('Skipping NS record for %s' % (addr1,))
-            else:
-                dt=[addr2, ttl]
-                self.dt['ns'].append(dt)
-        elif rr=='TXT':
-            dt=[addr1, addr2, ttl]
-            self.dt['txt'].append(dt)
-        elif rr=='MX':
-            t=addr2.split(None, 1)
-            dt=[addr1, int(t[0]), t[1], ttl]
-            self.dt['mx'].append(dt)
+                self.dt.ds.append(ds)
+        elif r.rr == 'SRV':
+            self.dt.srv.append(vdns.rr.SRV.parse_line(domain, r))
         else:
-            logging.info("Unhandled %s:" % (rr,) + repr(r))
+            logging.info('Unhandled %s: %r', r.rr, r)
 
-    def read(self, fn, zone=None):
-        """
+    def _read_file(self, fn: str) -> Optional[list[str]]:
+        """Reads the contents of a file, to be mocked in tests."""
+        try:
+            f = open(fn, encoding='ASCII')  # pylint: disable=consider-using-with
+        except OSError:
+            logging.error('Failed to open file: %s', fn)
+            return None
+        return f.readlines()
+
+    def read(self, fn: str, zone: Optional[str] = None) -> None:
+        """Reads and parses a file."""
+        lines = self._read_file(fn)
+        if not lines:
+            return
+        self.parse(lines, zone)
+
+    def parse(self, lines: Iterable[str], zone: Optional[str] = None) -> None:
+        """Parses a set of lines.
+
+        @param lines    A source of lines to parse
         @param zone     Optional zone name. If None then the SOA name is used.
         """
 
-        lastname=None
-        domain=None
-        insoa=False
+        lastname: Optional[str] = None
+        domain: str = ''
+        origin: str = ''    # Doesn't include the final dot
+        in_parentheses = False
 
-        soa={
-            'name':     None,
-            'defttl':   None,
-            'refresh':  None,
-            'retry':    None,
-            'expire':   None,
-            'minimum':  None,
-            'contact':  None,
-            'serial':   None,
-            'ns0':      None,
-            }
-        soastr='';
+        buffer: list[str] = []  # For parentheses
 
-        if zone!=None:
-            domain=zone.strip('.')
-            soa['name']=domain
+        if zone is not None:
+            domain = zone.strip('.')
+            # soa['name'] = domain
 
-        self.dt['domain']=domain;
+        self.dt = ParsedDomainData()
 
-        defttl=-1;
+        defttl: datetime.timedelta = datetime.timedelta()
+        soattl: Optional[datetime.timedelta] = None
 
-        soattl=None
+        r: Optional[vdns.parsing.ParsedLine]
 
-        try:
-            f=open(fn)
-        except:
-            logging.error('Failed to open file: %s' % (fn,))
-            return(None)
-
-        for line0 in f:
+        for line0 in lines:
             # Remove comments etc...
-            line=cleanup_line(line0)
+            line = vdns.parsing.cleanup_line(line0)
 
             # Handle special entries
-            if line[:4]=='$TTL':
-                t=line.split()
-                defttl=parse_ttl(t[1])
-                self.dt['defttl']=defttl
+            if line.startswith('$TTL'):
+                t = line.split()
+                defttl = vdns.parsing.parse_ttl(t[1])
+                continue
+            if line.startswith('$ORIGIN'):
+                t = line.split()
+                assert t[1].endswith('.'), f"Origin line doesn't end with dot: {line}"
+                origin = t[1].removesuffix('.')
                 continue
 
-            # If we are in SOA then concatenate the lines until we find a )
-            # Then parse the resulting line
-            #
-            # Don't attempt to parse intermediate SOA lines. Remember that
-            # the first line is already parsed.
-            #
-            # This logic fails if the whole SOA is on one line and there is
-            # no empty/comment line after that.
-            if insoa:
-                soastr+=' '
-                soastr+=line
+            # Buffer lines while we're in parentheses
+            buffer.append(line)
+            in_parentheses = vdns.parsing.line_ends_in_parentheses(line, in_parentheses)
+            if in_parentheses:
+                continue
 
-                # The end
-                if ')' in soastr:
-                    insoa=False
+            line2 = vdns.parsing.merge_multiline(buffer, merge_quotes=True)
+            buffer = []
 
-                    r=parse_line(soastr)
-                    # msg(repr(r))
+            r = vdns.parsing.parse_line(line2)
 
-                    if r[1]==None:
-                        ttl=None
+            if r is None:
+                continue
+
+            if r.addr1 == '@':
+                r.addr1 = origin
+
+            if r.rr == 'SOA':
+                if domain:
+                    if r.addr1 not in ('@', domain):
+                        vdns.common.abort(f"Domain doesn't match! ({domain} - {r.addr1})")
+                else:
+                    if not r.addr1:
+                        # No domain from SOA and not provided as a parameter
+                        vdns.common.abort('Could not find domain from SOA')
                     else:
-                        ttl=parse_ttl(r[1])
+                        domain = r.addr1
 
-                    # Sample r[4]:
-                    #  hell.gr. root.hell.gr. ( 2012062203 24H 1H 1W 1H )
-                    # After removal if ( and ):
-                    #  hell.gr. root.hell.gr. 2012062203 24H 1H 1W 1H
-                    # Fields:
-                    #  0: ns0
-                    #  1: contact
-                    #  2: serial
-                    #  3: refresh
-                    #  4: retry
-                    #  5: expire
-                    #  6: minimum
+                # Domain name was not passed as a parameter and wasn't determined from SOA
+                if not domain:
+                    vdns.common.abort('Failed to determine domain')
 
-                    t=r[4].replace('(','').replace(')','').split()
+                logging.debug('Domain: %s', domain)
 
-#                    if domain.strip('.')!=t[0].strip('.'):
-#                        error("Domain doesn't match! (%s - %s)" % \
-#                            (domain, t[0]))
+                lastname = None
 
-                    if ttl==None:
-                        ttl=defttl
+                if r.ttl is None:
+                    soattl = defttl
+                else:
+                    soattl = vdns.parsing.parse_ttl(r.ttl)
 
-                    soattl=ttl
+                # Sample r.addr2
+                #  hell.gr. root.hell.gr. ( 2012062203 24H 1H 1W 1H )
+                # After removal of ( and ):
+                #  hell.gr. root.hell.gr. 2012062203 24H 1H 1W 1H
+                # Fields:
+                #  0: ns0
+                #  1: contact
+                #  2: serial
+                #  3: refresh
+                #  4: retry
+                #  5: expire
+                #  6: minimum
 
-                    self.dt['soa']={
-                        'name':         domain,
-                        'contact':      t[1],
-                        'serial':       t[2],
-                        'ttl':          ttl,
-                        'refresh':      parse_ttl(t[3]),
-                        'retry':        parse_ttl(t[4]),
-                        'expire':       parse_ttl(t[5]),
-                        'minimum':      parse_ttl(t[6]),
-                        'ns0':          t[0],
-                        'reverse':      False
-                    }
-#                    ins_soa(name=domain, contact=t[1], serial=t[2], ttl=ttl,
-#                        refresh=t[3], retry=t[4], expire=t[5], minimum=t[6],
-#                        ns0=t[0], reverse=False)
+                t = r.addr2.split()
 
-                continue
-
-            r=parse_line(line)
-
-            if r==None:
-                continue
-
-            if r[3]=='SOA':
-                # domain=r[4].split()[0]
-                if r[0]!='@':
-                    if r[0]!=domain:
-                        error("Domain doesn't match! (%s - %s)" % \
-                            (domain, r[0]))
-
-                domain=zone
-                lastname=None
-
-                logging.debug("Domain: " + domain)
-
-                insoa=True
-                soastr=line
+                self.dt.name = domain
+                self.dt.soa = vdns.rr.SOA(
+                    name=domain,
+                    contact=t[1].removesuffix('.'),
+                    serial=int(t[2]),
+                    ttl=soattl,
+                    refresh=vdns.parsing.parse_ttl(t[3]),
+                    retry=vdns.parsing.parse_ttl(t[4]),
+                    expire=vdns.parsing.parse_ttl(t[5]),
+                    minimum=vdns.parsing.parse_ttl(t[6]),
+                    ns0=t[0].removesuffix('.'),
+                )
 
                 continue
 
-            if lastname==None and (r[0]==None or r[0]=='@'):
-                # msg("Zone entry: " + repr(r))
-                lastname=None
-            elif r[0]!=None:
-                lastname=r[0]
+            if lastname is None and (r.addr1 is None or r.addr1 == '@'):
+                lastname = None
+            elif r.addr1 is not None:
+                lastname = r.addr1
 
             # For reverse we only need the soa
             if self.is_reverse:
                 continue
 
-            r2=[lastname] + list(r[1:])
+            # r2 = [lastname] + list(r[1:])
+            entry = Entry(addr1=lastname, rr=r.rr, addr2=r.addr2)
+            entryttl: Optional[datetime.timedelta] = None
+            if r.ttl:
+                entryttl = vdns.parsing.parse_ttl(r.ttl)
 
             # Set TTL:
             #   If TTL if not specified:
@@ -532,66 +253,35 @@ class ZoneParser(object):
             #       Else use the specified TTL
             #
             # TTL is r2[1]
-            if r2[1]==None:
-                if soattl!=defttl:
-                    r2[1]=defttl
+            if entryttl is None:
+                if soattl != defttl and defttl is not None:
+                    entryttl = defttl
 
             # Don't convert this to 'else'. This way it will catch cases
             # where r2[1]==None (initially) and soattl!=defttl. In that case
             # r2[1] will become non-null and will be rexamined in case it
             # matches the soattl
-            if r2[1]!=None:
-                r2[1]=parse_ttl(r2[1])
-                if r2[1]==soattl:
-                    r2[1]=None
+            if entryttl is not None:
+                entry.ttl = entryttl
+                if entry.ttl == soattl:
+                    entry.ttl = None
 
-            self.add_entry(r2)
-#            handle_entry(domain, r2)
+            self.add_entry(entry, domain)
 
-    def show(self):
+        if buffer:
+            vdns.common.abort(f'Zone parsing ended with data in the buffer: {buffer}')
+
+    def show(self) -> None:
         """
         Show the data
         """
         pprint(self.dt)
 
-    def make_sql(self):
-        """
-        Return a list of SQL commands
-        """
-
-        dt=self.dt
-        d=dt['domain']
-
-        ret=[]
-
-        for x in dt['a']:           ret.append(ins_a(d, *x))
-        for x in dt['aaaa']:        ret.append(ins_a(d, *x))
-        for x in dt['cname']:       ret.append(ins_cname(d, *x))
-        for x in dt['ns']:          ret.append(ins_ns(d, *x))
-        for x in dt['txt']:         ret.append(ins_txt(d, *x))
-        for x in dt['mx']:          ret.append(ins_mx(d, *x))
-
-        print('\n'.join(ret))
-
-    def data(self):
+    def data(self) -> ParsedDomainData:
         """
         Return the data dictionary
         """
 
-        return(self.dt)
-
-if __name__=='__main__':
-    init()
-
-    z=ZoneParser(Config.fn, Config.zone)
-
-    if Config.output=='sql':
-        z.make_sql()
-    elif Config.output=='dump':
-        z.show()
-#    z.show()
-#    z.make_sql()
-#    doit()
+        return self.dt
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

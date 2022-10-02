@@ -1,31 +1,44 @@
 #!/usr/bin/env python
 # coding=UTF-8
 #
+# Copyright (c) 2014-2016 Stefanos Harhalakis <v13@v13.gr>
+# Copyright (c) 2016-2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import logging
 import vdns.zone0
 
-class Zone(vdns.zone0.Zone0):
-    def __init__(self, *args, **kwargs):
-        vdns.zone0.Zone0.__init__(self, *args, **kwargs)
 
-    def make(self):
+class Zone(vdns.zone0.Zone0):
+
+    def make(self) -> str:
         """!
         @param incserial    If True then increment the serial number
         """
-        logging.debug('Doing domain %s' % (self.dt['name'], ))
+        logging.info('Doing domain %s', self.dt.data.name)
 
-        st=''
-        st+=self.make_soa()
-        st+=self.make_toplevel()
-        st+=self.make_subzones()
-        st+='\n'
-        st+=self.make_hosts()
+        st = ''
+        st += self.make_soa()
+        st += self.make_toplevel()
+        st += self.make_subzones()
+        st += '\n'
+        st += self.make_hosts()
 
-        return(st)
+        return st
 
-if __name__=="__main__":
+
+if __name__ == '__main__':
     pass
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-

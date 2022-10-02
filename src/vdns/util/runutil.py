@@ -1,21 +1,46 @@
+#!/usr/bin/env python
+# coding=UTF-8
+#
+# Copyright (c) 2014-2016 Stefanos Harhalakis <v13@v13.gr>
+# Copyright (c) 2016-2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import sys
 import logging
 import argparse
 import collections
+import vdns.common
+import vdns.util.test
 import vdns.util.config
 import vdns.util.export
+import vdns.util.import_key
 
-od=collections.OrderedDict
+from typing import Optional
 
-modules=od([
-    ('export',      vdns.util.export)
-    ])
+modules = collections.OrderedDict([
+    ('export', vdns.util.export),
+    ('test', vdns.util.test),
+    ('import-key', vdns.util.import_key),
+])
 
-def abort(msg, excode=1):
+
+def abort(msg: str, excode: int = 1) -> None:
     sys.stderr.write(msg)
     sys.exit(excode)
 
-def init_args():
+
+def init_args() -> None:
     """!
     Parameter handling
 
@@ -29,101 +54,115 @@ def init_args():
 
     Also sets Config.module, which can then be used for the rest of the stuff
     """
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
-    parser=argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
 
     parser.add_argument('-d', '--debug', action='store_true',
-        default=config.debug,
-        help='Enable debugging')
+                        default=config.debug,
+                        help='Enable debugging')
 
-    if config.util==None:
-        sub=parser.add_subparsers(dest='what')
+    parser.add_argument('--info', action='store_true',
+                        default=config.info,
+                        help='Enable informational messages')
+
+    if config.util is None:
+        sub = parser.add_subparsers(dest='what')
 
         # Add the arguments for each module
-        for k,v in modules.items():
-            subparser=sub.add_parser(k)
-            func=getattr(v, 'add_args')
-            func(subparser)
+        for k, v in modules.items():
+            subparser = sub.add_parser(k)
+            v.add_args(subparser)
 
         # In this mode, this gets set later
-        module=None
+        module = None
     elif config.util in modules:
         vdns.util.export.args.add_args(parser)
-        module=modules[config.util]
+        module = modules[config.util]
     else:
-        abort('Bad utility name: %s' % (config.util,))
+        abort(f'Bad utility name: {config.util}')
 
     # Parse them
-    args=parser.parse_args()
+    args = parser.parse_args()
 
     # Handle top-level parameters
-    config.debug=args.debug
+    config.debug = args.debug
+    config.info = args.info
 
     if config.util:
-        config.what=config.util
+        config.what = config.util
+    elif args.what:
+        config.what = args.what
     else:
-        config.what=args.what
-
-    if config.what==None:
         parser.error('Must specify a utility')
 
-    if module==None:
-        if config.what=='export':
-            module=vdns.util.export
-        else:
-            abort('Bad action: %s' % (config.what,))
+    if module is None:
+        module = modules.get(config.what)
+        if module is None:
+            abort(f'Bad action: f{config.what}')
 
-    config.module=module
+    assert module is not None
+
+    config.module = module
 
     # Init log early
     init_log()
 
-    logging.debug('Module: %s' % (config.what,))
+    logging.debug('Module: %s', config.what)
 
     # Handle module params
     module.args.handle_args(args)
 
-def init_log():
-    config=vdns.util.config.get_config()
+
+def init_log() -> None:
+    config = vdns.util.config.get_config()
 
     if config.debug:
-        level=logging.DEBUG
+        level = logging.DEBUG
+    elif config.info:
+        level = logging.INFO
     else:
-        level=logging.WARNING
+        level = logging.WARNING
 
     logging.basicConfig(level=level)
 
-def init():
-    config=vdns.util.config.get_config()
+
+def init() -> None:
+    config = vdns.util.config.get_config()
 
     init_args()
     logging.debug('Initializing module')
     config.module.init()
 
-def doit():
-    config=vdns.util.config.get_config()
 
-    logging.debug('Doing main')
-    ret=config.module.doit()
+def doit() -> int:
+    config = vdns.util.config.get_config()
 
-    return(ret)
+    logging.debug('Running module')
+    ret = config.module.doit()
 
-def runutil(util):
+    return ret
+
+
+def runutil(util: Optional[str]) -> None:
     """!
     Run for a certain utility or for all of them
 
     @param util     A utility name, or None to provide all of them
     """
-    config=vdns.util.config.get_config()
+    config = vdns.util.config.get_config()
 
-    config.util=util
+    config.util = util
 
     init()
 
-    ret=doit()
+    try:
+        ret = doit()
+    except vdns.common.AbortError as r:
+        if not r.error_shown:
+            logging.error('Execution failed: %s', r)
+        ret = r.excode
 
     sys.exit(ret)
 
 # vim: set ts=8 sts=4 sw=4 et formatoptions=r ai nocindent:
-
